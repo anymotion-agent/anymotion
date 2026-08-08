@@ -32,7 +32,7 @@ Both drive the same Puppeteer + `window.seek(t)` contract the renderer uses, so 
 
 **Requirements:** Node.js 18+ (and FFmpeg for MP4 video export).
 
-### Quick Install
+### Quick Install (Recommended)
 
 ```bash
 # Install globally from NPM
