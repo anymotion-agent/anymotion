@@ -1,0 +1,65 @@
+{
+  "name": "anymotion",
+  "version": "1.0.0",
+  "description": "Anymotion — AI motion graphics agent for the terminal. Describe an animation, get a rendered MP4: planned, built, and visually checked by the agent itself.",
+  "main": "bin/motion-cli.js",
+  "type": "module",
+  "bin": {
+    "anymotion": "./bin/motion-cli.js",
+    "motion": "./bin/motion-cli.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/",
+    "web-editor/",
+    "skills/",
+    "motion.config.example.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node bin/motion-cli.js",
+    "install:anymotion": "node scripts/install.js",
+    "setup": "node scripts/install.js --setup",
+    "doctor": "node scripts/install.js --doctor",
+    "generate": "node bin/motion-cli.js generate",
+    "render": "node bin/motion-cli.js render",
+    "serve": "node bin/motion-cli.js serve",
+    "projects": "node bin/motion-cli.js projects",
+    "agent": "node bin/motion-cli.js generate --serve",
+    "test": "node --test test/"
+  },
+  "keywords": [
+    "motion-graphics",
+    "ai-agent",
+    "claude",
+    "anymotion",
+    "animation",
+    "video-editor",
+    "saas-explainer",
+    "1080p"
+  ],
+  "author": "Ali Usman (https://aliusman.site)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anymotion/anymotion.git"
+  },
+  "bugs": {
+    "url": "https://github.com/anymotion/anymotion/issues"
+  },
+  "homepage": "https://github.com/anymotion/anymotion#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "cors": "^2.8.6",
+    "express": "^4.19.2",
+    "inquirer": "^9.2.15",
+    "puppeteer": "^22.6.0"
+  }
+}

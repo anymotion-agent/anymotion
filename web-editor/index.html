@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anymotion Editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="editor.css">
+  <link rel="stylesheet" href="animations.css">
+</head>
+<body>
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Hidden Music File Input -->
+  <input type="file" id="audioFileInput" accept="audio/*" style="display: none;">
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand-logo">
+        <span class="logo-mark">●</span>
+        <span class="brand-name">ANY<b>MOTION</b></span>
+        <span class="version-tag">STUDIO v1.0</span>
+      </div>
+      <div class="divider"></div>
+      <button class="theme-toggle-btn" id="btnThemeToggle" title="Toggle Light / Dark Theme">
+        <svg id="moonIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+        <svg id="sunIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <span id="themeLabel">Dark Mode</span>
+      </button>
+
+      <!-- Undo / Redo Buttons -->
+      <button class="btn btn-ghost" id="btnUndo" title="Undo Action (Ctrl + Z)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>
+        Undo
+      </button>
+      <button class="btn btn-ghost" id="btnRedo" title="Redo Action (Ctrl + Shift + Z)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7"/></svg>
+        Redo
+      </button>
+    </div>
+
+    <!-- 16:9 Fixed Landscape Aspect Ratio (Default for Motion Graphics) -->
+
+    <div class="header-right">
+      <button class="btn btn-ghost" id="btnOpenProject">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        Open Project
+      </button>
+      <button class="btn btn-ghost" id="btnUploadMusic">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13M9 9l12-2"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        Add Music
+      </button>
+      <button class="btn btn-ghost" id="btnResetCanvas">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        Reset
+      </button>
+      <button class="btn btn-solid" id="btnExportTop">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        Export 2K MP4
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Layout Split: Top Workspace + Bottom Timeline -->
+  <div class="editor-workspace">
+    
+    <!-- TOP SECTION: 3-Column Studio -->
+    <div class="top-studio">
+      <!-- Column 1: CapCut-Style Asset & Media Library Sidebar -->
+      <div class="capcut-left-panel">
+        <!-- Narrow Vertical Ribbon Tabs -->
+        <nav class="capcut-ribbon">
+          <button class="ribbon-tab active" data-tab="tab-layers" title="Project Layers & Scenes">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            <span>Layers</span>
+          </button>
+          <button class="ribbon-tab" data-tab="tab-add-text" title="Add Text & Titles">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+            <span>Text</span>
+          </button>
+          <button class="ribbon-tab" data-tab="tab-add-audio" title="Audio & SFX Library">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            <span>Audio</span>
+          </button>
+          <button class="ribbon-tab" data-tab="tab-transitions" title="Scene Transitions">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="16 3 21 8 8 21 3 21 3 16 16 3"/><line x1="14" y1="7" x2="18" y2="11"/></svg>
+            <span>Transitions</span>
+          </button>
+          <button class="ribbon-tab" data-tab="tab-add-elements" title="Motion Assets & Photos">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            <span>Assets</span>
+          </button>
+        </nav>
+
+        <!-- Sidebar Panel Container -->
+        <aside class="sidebar-left">
+          <!-- TAB 1: PROJECT LAYERS & SCENES (Default Active) -->
+          <div class="sidebar-tab-content active" id="tab-layers">
+            <div class="sidebar-header">
+              <span>PROJECT SCENES</span>
+            </div>
+            <div class="scene-group" id="sceneGroup"></div>
+
+            <div class="sidebar-divider">LAYERS ON CANVAS (<span id="layerCountTag">0</span>)</div>
+            <div class="layers-list" id="layersList"></div>
+          </div>
+
+          <!-- TAB 2: ADD TEXT & TITLES -->
+          <div class="sidebar-tab-content" id="tab-add-text">
+            <div class="sidebar-header">
+              <span>ADD TEXT TO SCENE</span>
+            </div>
+            <div class="asset-grid-list">
+              <button class="asset-item-card" data-action="add-h1">
+                <div class="asset-icon-box" style="font-weight: 800; font-size: 20px;">T1</div>
+                <div class="asset-info">
+                  <span class="asset-title">Title / Headline (H1)</span>
+                  <span class="asset-desc">Bold 38px main typography</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card" data-action="add-p">
+                <div class="asset-icon-box" style="font-weight: 500; font-size: 15px;">T2</div>
+                <div class="asset-info">
+                  <span class="asset-title">Subheading (P)</span>
+                  <span class="asset-desc">Clean 18px supporting text</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card" data-action="add-badge">
+                <div class="asset-icon-box" style="font-size: 11px; padding: 2px 6px; border-radius: 99px; background: rgba(99,102,241,0.2); border: 1px solid var(--accent); color: var(--accent);">TAG</div>
+                <div class="asset-info">
+                  <span class="asset-title">Pill Badge / Tag</span>
+                  <span class="asset-desc">Glowing SaaS tag pill</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card" data-action="add-cta">
+                <div class="asset-icon-box" style="font-size: 12px; padding: 4px 8px; border-radius: 6px; background: var(--accent); color: #fff;">CTA</div>
+                <div class="asset-info">
+                  <span class="asset-title">Callout Action Button</span>
+                  <span class="asset-desc">Animated interactive button</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- TAB 3: AUDIO & SFX LIBRARY -->
+          <div class="sidebar-tab-content" id="tab-add-audio">
+            <div class="sidebar-header">
+              <span>AUDIO &amp; SOUND EFFECTS</span>
+            </div>
+            <div style="padding: 10px 12px;">
+              <button class="btn btn-solid btn-block" id="btnSidebarAddMusic" style="margin-bottom: 12px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M9 18V5l12-2v13M9 9l12-2"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                Import Background Music
+              </button>
+              <div class="sidebar-divider" style="margin: 8px 0 10px 0;">KENNEY UI SFX PACK</div>
+            </div>
+            <div class="asset-grid-list" id="sidebarSfxList">
+              <!-- Dynamically populated by editor.js -->
+            </div>
+          </div>
+
+          <!-- TAB 4: SCENE TRANSITIONS -->
+          <div class="sidebar-tab-content" id="tab-transitions">
+            <div class="sidebar-header">
+              <span>SCENE TRANSITIONS</span>
+            </div>
+            <div class="asset-grid-list">
+              <button class="asset-item-card transition-item" data-trans="wipe-left">
+                <div class="asset-icon-box">WIPE</div>
+                <div class="asset-info">
+                  <span class="asset-title">Smooth Wipe Left</span>
+                  <span class="asset-desc">Horizontal left sweep</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card transition-item" data-trans="wipe-right">
+                <div class="asset-icon-box">WIPE</div>
+                <div class="asset-info">
+                  <span class="asset-title">Smooth Wipe Right</span>
+                  <span class="asset-desc">Horizontal right sweep</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card transition-item" data-trans="zoom-push">
+                <div class="asset-icon-box">ZOOM</div>
+                <div class="asset-info">
+                  <span class="asset-title">Zoom Push Cut</span>
+                  <span class="asset-desc">Fast camera push through</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card transition-item" data-trans="glitch-cut">
+                <div class="asset-icon-box">RGB</div>
+                <div class="asset-info">
+                  <span class="asset-title">Digital RGB Glitch</span>
+                  <span class="asset-desc">SaaS tech glitch jump</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card transition-item" data-trans="light-flash">
+                <div class="asset-icon-box">FLASH</div>
+                <div class="asset-info">
+                  <span class="asset-title">Light Flash Cut</span>
+                  <span class="asset-desc">Bright exposure flash</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card transition-item" data-trans="blur-dissolve">
+                <div class="asset-icon-box">BLUR</div>
+                <div class="asset-info">
+                  <span class="asset-title">Cinematic Blur Cut</span>
+                  <span class="asset-desc">Soft focus dissolve</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- TAB 5: MOTION ASSETS & PHOTOS -->
+          <div class="sidebar-tab-content" id="tab-add-elements">
+            <div class="sidebar-header">
+              <span>MEDIA GALLERY &amp; ASSETS</span>
+            </div>
+            <div style="padding: 10px 12px;">
+              <input type="file" id="inputGalleryMedia" accept="image/*,video/*" multiple style="display:none;" />
+              <button class="btn btn-solid btn-block" id="btnUploadGalleryMedia" style="margin-bottom: 12px; background: rgba(99,102,241,0.2); border: 1px dashed #818cf8; color: #818cf8; font-weight: 700;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                Upload Photo / Video from Gallery
+              </button>
+            </div>
+
+            <!-- Dynamic User Uploaded Gallery -->
+            <div id="userGallerySection" style="display: none;">
+              <div class="sidebar-divider">YOUR UPLOADED MEDIA</div>
+              <div class="asset-grid-list" id="userGalleryGrid"></div>
+            </div>
+
+            <div class="sidebar-divider">SAAS UI COMPONENTS</div>
+            <div class="asset-grid-list">
+              <button class="asset-item-card" data-action="add-saas-card">
+                <div class="asset-icon-box">APP</div>
+                <div class="asset-info">
+                  <span class="asset-title">SaaS App Card</span>
+                  <span class="asset-desc">Glassmorphism UI window</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card" data-action="add-metric-badge">
+                <div class="asset-icon-box">STATS</div>
+                <div class="asset-info">
+                  <span class="asset-title">Growth Metric Card</span>
+                  <span class="asset-desc">+128% Analytics badge</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card" data-action="add-photo-frame">
+                <div class="asset-icon-box">FRAME</div>
+                <div class="asset-info">
+                  <span class="asset-title">Photo / Media Frame</span>
+                  <span class="asset-desc">Placeholder image card</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card" data-action="add-glow-blob">
+                <div class="asset-icon-box">GLOW</div>
+                <div class="asset-info">
+                  <span class="asset-title">Glow Backdrop Accent</span>
+                  <span class="asset-desc">Radial neon ambient blob</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+            </div>
+
+            <div class="sidebar-divider">STOCK PHOTOS &amp; VIDEOS</div>
+            <div class="asset-grid-list">
+              <button class="asset-item-card gallery-media-card" data-media-type="photo" data-media-url="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=800&q=80">
+                <div class="asset-icon-box" style="background: rgba(99,102,241,0.25); color: #818cf8;">PHOTO</div>
+                <div class="asset-info">
+                  <span class="asset-title">SaaS Analytics Dashboard</span>
+                  <span class="asset-desc">Modern dark UI graph photo</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card gallery-media-card" data-media-type="photo" data-media-url="https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=800&q=80">
+                <div class="asset-icon-box" style="background: rgba(99,102,241,0.25); color: #818cf8;">PHOTO</div>
+                <div class="asset-info">
+                  <span class="asset-title">Tech Team Workspace</span>
+                  <span class="asset-desc">Modern startup team photo</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card gallery-media-card" data-media-type="photo" data-media-url="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80">
+                <div class="asset-icon-box" style="background: rgba(99,102,241,0.25); color: #818cf8;">PHOTO</div>
+                <div class="asset-info">
+                  <span class="asset-title">3D Liquid Glass</span>
+                  <span class="asset-desc">Apple-style abstract artwork</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card gallery-media-card" data-media-type="photo" data-media-url="https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=800&q=80">
+                <div class="asset-icon-box" style="background: rgba(99,102,241,0.25); color: #818cf8;">PHOTO</div>
+                <div class="asset-info">
+                  <span class="asset-title">Productivity Chart</span>
+                  <span class="asset-desc">Business analytics dashboard</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card gallery-media-card" data-media-type="video" data-media-url="https://assets.mixkit.co/videos/preview/mixkit-set-of-plateaus-seen-from-the-sky-in-a-sunset-26070-large.mp4">
+                <div class="asset-icon-box" style="background: rgba(16,185,129,0.25); color: #10b981;">VIDEO</div>
+                <div class="asset-info">
+                  <span class="asset-title">Abstract Sunset Plateaus</span>
+                  <span class="asset-desc">Cinematic aerial video background</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+              <button class="asset-item-card gallery-media-card" data-media-type="video" data-media-url="https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1610-large.mp4">
+                <div class="asset-icon-box" style="background: rgba(16,185,129,0.25); color: #10b981;">VIDEO</div>
+                <div class="asset-info">
+                  <span class="asset-title">Cyber Space Stars Loop</span>
+                  <span class="asset-desc">Dark sci-fi motion background</span>
+                </div>
+                <div class="asset-add-btn">+</div>
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Column 2: Compact Center Canvas Preview -->
+      <section class="canvas-stage">
+        <div class="canvas-wrapper">
+          <div class="canvas-frame aspect-16-9" id="canvasFrame">
+            <iframe id="previewIframe" src="/project/index.html"></iframe>
+          </div>
+        </div>
+      </section>
+
+      <!-- Column 3: Contextual Inspector Sidebar -->
+      <aside class="sidebar-right">
+        <div class="inspector-header">
+          <span class="header-title" id="selectedLayerTitle">SELECT AN ELEMENT ON CANVAS</span>
+          <span class="selected-tag" id="selectedTag">NO SELECTION</span>
+        </div>
+
+        <div class="inspector-hint" id="noSelectionHint">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"/></svg>
+          <p><b>Click & drag any text or element</b> directly on the canvas preview to move it!</p>
+        </div>
+
+        <!-- Form for Selected Element (CapCut Desktop Professional UX/UI) -->
+        <div class="inspector-form" id="inspectorForm" style="display: none;">
+          
+          <!-- CapCut Segmented Nav Tabs -->
+          <div class="capcut-inspector-tabs">
+            <button class="capcut-tab-btn active" data-panel="panel-basic">Basic</button>
+            <button class="capcut-tab-btn" data-panel="panel-animation">Animation</button>
+            <button class="capcut-tab-btn" data-panel="panel-style">Style &amp; Blend</button>
+          </div>
+
+          <!-- PANEL 1: BASIC (TRANSFORM, POSITION, ROTATE, ALIGNMENT, TEXT) -->
+          <div class="capcut-panel active" id="panel-basic">
+            
+            <!-- Section Header: Transform -->
+            <div class="capcut-section-header">
+              <span class="section-title">Transform</span>
+              <button class="btn-reset-icon" id="btnResetTransform" title="Reset Transform">↺</button>
+            </div>
+
+            <!-- Scale Slider -->
+            <div class="field-row-capcut">
+              <span class="capcut-label">Scale</span>
+              <div class="capcut-slider-wrap">
+                <input type="range" class="capcut-range" id="elScale" min="20" max="300" step="1" value="100">
+                <div class="capcut-val-box"><span id="valScale">100%</span></div>
+              </div>
+            </div>
+
+            <!-- Uniform Scale Toggle -->
+            <div class="field-row-capcut" style="justify-content: space-between; margin-top: 6px;">
+              <span class="capcut-label">Uniform scale</span>
+              <label class="capcut-toggle">
+                <input type="checkbox" id="checkUniformScale" checked>
+                <span class="capcut-toggle-slider"></span>
+              </label>
+            </div>
+
+            <!-- Position X & Y -->
+            <div class="field-row-capcut" style="margin-top: 10px; gap: 12px;">
+              <span class="capcut-label" style="min-width: 55px;">Position</span>
+              <div class="capcut-coord-box">
+                <span class="coord-prefix">X</span>
+                <input type="number" class="coord-input" id="elPosX" value="0">
+              </div>
+              <div class="capcut-coord-box">
+                <span class="coord-prefix">Y</span>
+                <input type="number" class="coord-input" id="elPosY" value="0">
+              </div>
+            </div>
+
+            <!-- Rotate -->
+            <div class="field-row-capcut" style="margin-top: 10px;">
+              <span class="capcut-label" style="min-width: 55px;">Rotate</span>
+              <div class="capcut-coord-box" style="width: 80px;">
+                <input type="number" class="coord-input" id="elRotation" value="0" min="-180" max="180">
+                <span class="coord-prefix" style="color:var(--text-dim);">°</span>
+              </div>
+              <div class="rotate-dial-indicator" id="rotateDial" title="Rotate Dial">●</div>
+            </div>
+
+            <!-- Alignment Toolbar -->
+            <div class="capcut-align-toolbar" style="margin-top: 14px;">
+              <button class="align-btn" data-align="left" title="Align Left">|←</button>
+              <button class="align-btn" data-align="center-h" title="Center Horizontally">‡</button>
+              <button class="align-btn" data-align="right" title="Align Right">→|</button>
+              <button class="align-btn" data-align="top" title="Align Top">T</button>
+              <button class="align-btn" data-align="center-v" title="Center Vertically">+</button>
+              <button class="align-btn" data-align="bottom" title="Align Bottom">|_</button>
+            </div>
+
+            <!-- Text Content Section (shown if text element) -->
+            <div id="groupTextSection" style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+              <div class="capcut-section-header">
+                <span class="section-title">Text Content &amp; Font</span>
+              </div>
+              <div class="field-group" style="margin-top: 8px;">
+                <input type="text" id="elText" class="capcut-text-input" placeholder="Enter text...">
+              </div>
+              <div class="field-row-capcut" style="margin-top: 10px;">
+                <span class="capcut-label">Font Size</span>
+                <div class="capcut-slider-wrap">
+                  <input type="range" class="capcut-range" id="elFontSize" min="12" max="120" value="56">
+                  <div class="capcut-val-box"><span id="valFontSize">56px</span></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- PANEL 2: ANIMATION (MOTION GRAPHICS PRESETS & SPEED) -->
+          <div class="capcut-panel" id="panel-animation" style="display: none;">
+            
+            <div class="capcut-section-header">
+              <span class="section-title">Motion Graphics Effect</span>
+              <button class="btn-reset-icon" id="btnResetAnimation" title="Reset Animation">↺</button>
+            </div>
+
+            <div class="field-group" style="margin-top: 8px;">
+              <label class="capcut-sublabel" for="selectAnimPreset">Select Motion Preset</label>
+              <select id="selectAnimPreset" class="capcut-select">
+                <optgroup label="Entrance (Scale & Pop)">
+                  <option value="pop-spring" selected>Pop &amp; Spring Bounce</option>
+                  <option value="liquid-glass">Liquid Glass Rise (Apple-style)</option>
+                  <option value="scale-bounce">Scale &amp; Elastic Bounce</option>
+                  <option value="drop-shadow-lift">Elevation Shadow Lift</option>
+                </optgroup>
+                <optgroup label="Entrance (Slide & Wipe)">
+                  <option value="fade-slide-up">Fade &amp; Slide Up</option>
+                  <option value="slide-down">Fade &amp; Slide Down</option>
+                  <option value="slide-left">Slide In Left</option>
+                  <option value="slide-right">Slide In Right</option>
+                  <option value="grow-up">Grow Up (Wipe)</option>
+                  <option value="typewriter-sweep">Typewriter / Sweep Reveal</option>
+                </optgroup>
+                <optgroup label="Kinetic & 3D (Broadcast)">
+                  <option value="blur-zoom">Kinetic Blur Zoom</option>
+                  <option value="tilt-3d">3D Tilt Card Flip</option>
+                  <option value="flip-x-in">3D Horizontal Card Flip</option>
+                  <option value="flip-y-in">3D Vertical Card Flip</option>
+                  <option value="zoom-push-in">Camera Zoom Push In</option>
+                  <option value="zoom-pull-out">Camera Zoom Pull Out</option>
+                  <option value="skew-slide">High-Velocity Skew Slide</option>
+                  <option value="glitch-entrance">Digital RGB Glitch Entrance</option>
+                </optgroup>
+                <optgroup label="Emphasis & Ambient (Loops)">
+                  <option value="glow-float">Liquid Glow Float &amp; Pulse</option>
+                  <option value="float-gentle">Gentle Hovering Float</option>
+                  <option value="glow-pulse">Neon Accent Pulse</option>
+                  <option value="wobble-elastic">Elastic Ripple Wobble</option>
+                </optgroup>
+              </select>
+            </div>
+
+            <div class="field-row-capcut" style="margin-top: 16px;">
+              <span class="capcut-label">Duration</span>
+              <div class="capcut-slider-wrap">
+                <input type="range" class="capcut-range" id="rangeAnimSpeed" min="0.2" max="3.0" step="0.1" value="0.8">
+                <div class="capcut-val-box"><span id="valAnimSpeed">0.8s</span></div>
+              </div>
+              <select id="selectAnimSpeed" style="display:none;">
+                <option value="0.3">0.3s Quick</option>
+                <option value="0.5">0.5s Fast</option>
+                <option value="0.8" selected>0.8s Snappy</option>
+                <option value="1.0">1.0s Normal</option>
+                <option value="1.5">1.5s Smooth</option>
+                <option value="2.0">2.0s Cinematic</option>
+                <option value="3.0">3.0s Long</option>
+              </select>
+            </div>
+
+            <!-- CSS ANIMATION PRESETS (50+) -->
+            <div class="capcut-section-header" style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+              <span class="section-title">Animate.css Presets (50+)</span>
+            </div>
+            <div class="asset-grid-list" id="sidebarAnimList" style="max-height: 300px; overflow-y: auto;">
+              <!-- Dynamically populated by editor.js -->
+            </div>
+
+          </div>
+
+          <!-- PANEL 3: STYLE & BLEND -->
+          <div class="capcut-panel" id="panel-style" style="display: none;">
+            
+            <div class="capcut-section-header">
+              <span class="section-title">Blend &amp; Opacity</span>
+              <button class="btn-reset-icon" id="btnResetStyle" title="Reset Style">↺</button>
+            </div>
+
+            <div class="field-row-capcut" style="margin-top: 8px;">
+              <span class="capcut-label">Opacity</span>
+              <div class="capcut-slider-wrap">
+                <input type="range" class="capcut-range" id="elOpacity" min="0.1" max="1.0" step="0.05" value="1.0">
+                <div class="capcut-val-box"><span id="valOpacity">100%</span></div>
+              </div>
+            </div>
+
+            <div class="capcut-section-header" style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+              <span class="section-title">Color &amp; Shape Styling</span>
+            </div>
+
+            <div class="field-row-capcut" style="margin-top: 10px;">
+              <span class="capcut-label">Text Color</span>
+              <div class="capcut-color-picker-wrap">
+                <input type="color" id="elColor" value="#ffffff">
+                <span class="color-hex-tag" id="hexElColor">#FFFFFF</span>
+              </div>
+            </div>
+
+            <div class="field-row-capcut" style="margin-top: 10px;">
+              <span class="capcut-label">Background</span>
+              <div class="capcut-color-picker-wrap">
+                <input type="color" id="elBgColor" value="#0a0a0c">
+                <span class="color-hex-tag" id="hexElBgColor">#0A0A0C</span>
+              </div>
+            </div>
+
+            <div class="field-row-capcut" style="margin-top: 14px;">
+              <span class="capcut-label">Corner Radius</span>
+              <div class="capcut-slider-wrap">
+                <input type="range" class="capcut-range" id="elRadius" min="0" max="60" value="24">
+                <div class="capcut-val-box"><span id="valRadius">24px</span></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Bottom Action Buttons -->
+          <div class="field-row" style="margin-top: 18px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+            <button class="btn btn-solid btn-block" id="btnUpdateElement"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>
+            <button class="btn btn-danger btn-block" id="btnDeleteElement"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</button>
+          </div>
+
+        </div>
+
+        <!-- Audio Inspector: shown when an SFX marker or the music clip is selected.
+             Audio used to have no inspector at all, so a selected sound had nowhere to
+             report its timing or take an edit. -->
+        <div class="inspector-form" id="audioInspector" style="display: none;">
+          <div class="field-group">
+            <label for="audioStartTime">Start Time (seconds)</label>
+            <input type="number" id="audioStartTime" step="0.05" min="0" value="0">
+          </div>
+
+          <div class="field-group" id="groupAudioDuration">
+            <div class="label-row">
+              <label for="audioDuration">Duration (seconds)</label>
+              <span class="value-badge" id="valAudioDuration">1.0s</span>
+            </div>
+            <input type="number" id="audioDuration" step="0.05" min="0.1" value="1">
+          </div>
+
+          <div class="field-group">
+            <div class="label-row">
+              <label for="audioVolume">Volume</label>
+              <span class="value-badge" id="valAudioVolume">100%</span>
+            </div>
+            <input type="range" id="audioVolume" min="0" max="1" step="0.05" value="1">
+          </div>
+
+          <div class="field-row">
+            <button class="btn btn-ghost btn-block" id="btnAudioPreview"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:4px;"><polygon points="5 3 19 12 5 21 5 3"/></svg> Preview</button>
+            <button class="btn btn-danger btn-block" id="btnAudioDelete"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</button>
+          </div>
+        </div>
+
+        <div class="sidebar-divider">COLOR THEME PRESETS (12)</div>
+        <div class="global-preset-group">
+          <div class="theme-grid-extended">
+            <button class="theme-card active" data-accent="#ffffff" data-bg="#0a0a0c"><span class="dot" style="background:#ffffff;"></span> Studio Black</button>
+            <button class="theme-card" data-accent="#6366f1" data-bg="#090d16"><span class="dot" style="background:#6366f1;"></span> Deep Indigo</button>
+            <button class="theme-card" data-accent="#ec4899" data-bg="#0f172a"><span class="dot" style="background:#ec4899;"></span> Cyberpunk</button>
+            <button class="theme-card" data-accent="#10b981" data-bg="#064e3b"><span class="dot" style="background:#10b981;"></span> Emerald Mint</button>
+            <button class="theme-card" data-accent="#eab308" data-bg="#18181b"><span class="dot" style="background:#eab308;"></span> Luxury Gold</button>
+            <button class="theme-card" data-accent="#a855f7" data-bg="#1e1b4b"><span class="dot" style="background:#a855f7;"></span> Cosmic Violet</button>
+            <button class="theme-card" data-accent="#f43f5e" data-bg="#1c1917"><span class="dot" style="background:#f43f5e;"></span> Sunset Red</button>
+            <button class="theme-card" data-accent="#06b6d4" data-bg="#083344"><span class="dot" style="background:#06b6d4;"></span> Electric Cyan</button>
+            <button class="theme-card" data-accent="#f97316" data-bg="#1a0f07"><span class="dot" style="background:#f97316;"></span> Tangerine</button>
+            <button class="theme-card" data-accent="#09090b" data-bg="#f4f4f5"><span class="dot" style="background:#09090b;"></span> Studio Light</button>
+            <button class="theme-card" data-accent="#d946ef" data-bg="#2e1065"><span class="dot" style="background:#d946ef;"></span> Neon Fuchsia</button>
+            <button class="theme-card" data-accent="#3b82f6" data-bg="#0f172a"><span class="dot" style="background:#3b82f6;"></span> Ocean Blue</button>
+          </div>
+        </div>
+
+        <div class="sidebar-divider">EXPORT OPTIONS</div>
+        <div class="export-box">
+          <div class="field-group">
+            <label for="selectResolution">Resolution</label>
+            <select id="selectResolution">
+              <option value="2k" selected>2K Quad HD (2560x1440)</option>
+              <option value="1080p">1080p Full HD (1920x1080)</option>
+              <option value="4k">4K Ultra HD (3840x2160)</option>
+            </select>
+          </div>
+          <button class="btn btn-solid btn-block btn-lg" id="btnExportVideo">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            Render Video File
+          </button>
+          <div id="renderStatus" class="render-status" style="display: none;">
+            <div class="spinner"></div>
+            <span id="renderStatusText">Rendering video... Please wait</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- BOTTOM SECTION: Anymotion Multitrack Video & Audio Timeline Engine -->
+    <div class="bottom-timeline">
+      <div class="timeline-toolbar">
+        <div class="toolbar-left">
+          <button class="ctrl-btn main-play" id="btnPlayPause" title="Play / Pause (Spacebar)">
+            <svg id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="pauseIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          </button>
+          <button class="ctrl-btn" id="btnStepBack" title="-0.05s Step"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 20L9 12l10-8v16zM5 19V5"/></svg></button>
+          <button class="ctrl-btn" id="btnStepForward" title="+0.05s Step"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4l10 8-10 8V4zM19 5v14"/></svg></button>
+          <button class="btn btn-ghost btn-sm" id="btnSplitClip" title="Split Clip at Playhead (S or Ctrl+B)" style="margin-left:4px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg>
+            Split
+          </button>
+          <div class="time-readout" id="timeReadout">00:00.0 / 00:10.0</div>
+        </div>
+
+        <div class="toolbar-center">
+          <div class="add-sfx-dropdown">
+            <button class="btn btn-ghost btn-sm" id="btnAddSfxMarker">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5zM19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+              + Add Sound Effect
+            </button>
+            <div class="sfx-menu" id="sfxMenu">
+              <button class="sfx-opt" data-sfx="whoosh">Whoosh Sweep</button>
+              <button class="sfx-opt" data-sfx="pop">Pop Entrance</button>
+              <button class="sfx-opt" data-sfx="glitch">Tech Glitch</button>
+              <button class="sfx-opt" data-sfx="chime">Resonant Chime</button>
+              <button class="sfx-opt" data-sfx="click">Snap Click</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="toolbar-right">
+          <!-- TIMELINE ZOOM IN / ZOOM OUT CONTROLS -->
+          <div class="zoom-control">
+            <button class="ctrl-btn" id="btnZoomOut" title="Zoom Out Timeline (Ctrl + -)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M8 11h6"/></svg>
+            </button>
+            <input type="range" id="sliderZoom" min="100" max="400" step="10" value="100" title="Timeline Zoom Level">
+            <button class="ctrl-btn" id="btnZoomIn" title="Zoom In Timeline (Ctrl + +)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/></svg>
+            </button>
+            <span class="value-badge" id="valZoomLevel" style="min-width:38px; text-align:center;">100%</span>
+          </div>
+
+          <div class="vol-control">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/></svg>
+            <input type="range" id="sliderVolume" min="0" max="1" step="0.05" value="0.7" title="Audio Volume">
+          </div>
+          <select id="selectSpeed" class="speed-select">
+            <option value="0.5">0.5x</option>
+            <option value="1.0" selected>1.0x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2.0">2.0x</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Multitrack Canvas Tracks Workspace -->
+      <div class="multitrack-container" id="multitrackContainer">
+        <div class="playhead-needle" id="playheadNeedle"></div>
+
+        <!-- Track Headers Column -->
+        <div class="track-headers" id="trackHeaders">
+          <div class="ruler-header-corner">REAL TIMELINE</div>
+        </div>
+
+        <div class="track-body" id="trackBody">
+          <!-- Real Time Ruler Header Ticks -->
+          <div class="ruler-ticks-bar" id="rulerTicksBar">
+            <span>00:00</span><span>00:02</span><span>00:04</span><span>00:06</span><span>00:08</span><span>00:10</span>
+          </div>
+
+          <!-- DYNAMIC DEDICATED LAYER TRACK ROWS -->
+          <div class="multitrack-rows-wrapper" id="trackVideo"></div>
+
+          <!-- TRACK 2 & 3: Background Music and SFX. Both rows are rendered by
+               renderAudioTracks() in editor.js from the real timing model — they used to be
+               hardcoded at percentages that only lined up on a 10s project, and could
+               neither be moved nor removed. -->
+          <div class="track-row" id="trackMusic"></div>
+          <div class="track-row" id="trackSfx"></div>
+          <span id="musicTrackName" hidden>Ambient Synthwave Track</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ==========================================================================
+       🎬 ANYMOTION PROFESSIONAL EXPORT & RENDER STUDIO MODAL (CAPCUT / AE NLE UX)
+       ========================================================================== -->
+  <div class="export-modal-backdrop" id="exportStudioModal" style="display: none;">
+    <div class="export-modal-card">
+      
+      <!-- MODAL HEADER -->
+      <div class="export-modal-header">
+        <div class="export-modal-title">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#00cbd6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          <div>
+            <h3>Export Motion Graphics Video</h3>
+            <span class="export-subtitle">16:9 Broadcast Quality MP4 • Anymotion Master Render Engine</span>
+          </div>
+        </div>
+        <button class="btn-close-modal" id="btnCloseExportModal" title="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <!-- STAGE 1: EXPORT CONFIGURATION & SETTINGS (BEFORE RENDER) -->
+      <div class="export-modal-body" id="exportStageConfig">
+        <div class="export-config-grid">
+          
+          <!-- Left Column: Composition Preview & Specs -->
+          <div class="export-preview-col">
+            <div class="export-preview-thumb">
+              <div class="export-thumb-ratio-tag">16:9 LANDSCAPE PREVIEW</div>
+              <canvas id="exportRealCanvasThumb" width="320" height="180" style="width: 100%; border-radius: 8px; border: 1px solid rgba(0, 203, 214, 0.5); background: #0f172a; margin-bottom: 10px; display: block; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);"></canvas>
+              <div class="export-thumb-title">Anymotion SaaS Studio</div>
+              <div class="export-thumb-badges">
+                <span class="thumb-badge">1920 × 1080 Full HD</span>
+                <span class="thumb-badge">60 FPS AAC Stereo</span>
+              </div>
+            </div>
+            <div class="export-specs-list">
+              <div class="spec-row">
+                <span>Total Project Duration</span>
+                <strong id="exportSpecDuration">00:05.00s</strong>
+              </div>
+              <div class="spec-row">
+                <span>Aspect Ratio</span>
+                <strong>16:9 (Landscape)</strong>
+              </div>
+              <div class="spec-row">
+                <span>Estimated Master Size</span>
+                <strong id="exportSpecSize">~14.2 MB</strong>
+              </div>
+              <div class="spec-row">
+                <span>Audio Engine</span>
+                <strong>Stereo 48 kHz AAC</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Professional Settings Form (Simple & Premium) -->
+          <div class="export-settings-col">
+            <div class="export-field-group">
+              <label for="exportFileName">File Name</label>
+              <input type="text" id="exportFileName" class="export-text-input" value="Anymotion_SaaS_Explainer.mp4" spellcheck="false">
+            </div>
+
+            <div class="export-field-group">
+              <label for="exportResolution">Resolution Quality (720p — 4K)</label>
+              <select id="exportResolution" class="export-select-input">
+                <option value="720p">720p HD (1280 × 720) — Fast Web & Social</option>
+                <option value="1080p" selected>1080p Full HD (1920 × 1080) — Broadcast Standard</option>
+                <option value="4K">4K Ultra HD (3840 × 2160) — Master Pro Quality</option>
+              </select>
+            </div>
+
+            <div class="export-field-group">
+              <label for="exportFps">Frame Rate (FPS)</label>
+              <select id="exportFps" class="export-select-input">
+                <option value="60" selected>60 FPS — Ultra Smooth Motion Graphics</option>
+                <option value="30">30 FPS — Standard Web Video</option>
+                <option value="24">24 FPS — Cinematic Film Look</option>
+              </select>
+            </div>
+
+            <div class="export-audio-toggle-row">
+              <label class="export-checkbox-label">
+                <input type="checkbox" id="exportIncludeAudio" checked>
+                <span class="checkbox-custom"></span>
+                <span>Export with Stereo Music & Sound FX</span>
+              </label>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="export-modal-footer">
+          <button class="btn-export-cancel" id="btnCancelExport">Cancel</button>
+          <button class="btn-export-start" id="btnStartRender">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Render Video
+          </button>
+        </div>
+      </div>
+
+      <!-- STAGE 2: LIVE RENDERING PROGRESS VIEW (DURING RENDER) -->
+      <div class="export-modal-body" id="exportStageRendering" style="display: none;">
+        <div class="export-rendering-stage">
+          <div class="render-spinner-ring">
+            <div class="spinner-core">
+              <span id="renderPercentText">0%</span>
+            </div>
+          </div>
+          <h4 id="renderStageTitle">Rendering Motion Graphics Video...</h4>
+          <p class="render-step-status" id="renderStepStatus">Initializing 16:9 master composition & audio engine...</p>
+          
+          <!-- Glow Progress Bar -->
+          <div class="render-progress-track">
+            <div class="render-progress-fill" id="renderProgressBar" style="width: 0%;"></div>
+          </div>
+          
+          <div class="render-stats-row">
+            <span id="renderFrameCounter">Frame 0 of 300 (60 FPS)</span>
+            <span id="renderTimeElapsed">00:00 elapsed</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAGE 3: RENDER COMPLETE — VIDEO PREVIEW & DOWNLOAD VIEW (AFTER RENDER) -->
+      <div class="export-modal-body" id="exportStageComplete" style="display: none;">
+        <div class="export-complete-stage">
+          
+          <!-- Video Preview Box -->
+          <div class="export-video-preview-wrap">
+            <video id="exportVideoPlayer" class="export-video-player" controls autoplay loop playsinline></video>
+            <div class="export-complete-badge">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00cbd6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              16:9 RENDER COMPLETE
+            </div>
+          </div>
+
+          <!-- Video Spec Chips -->
+          <div class="export-result-chips">
+            <span class="result-chip" id="resultChipName">Anymotion_SaaS_Explainer.mp4</span>
+            <span class="result-chip" id="resultChipRes">1080p Full HD</span>
+            <span class="result-chip" id="resultChipFps">60 FPS</span>
+            <span class="result-chip" id="resultChipSize">~12.4 MB</span>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="export-complete-actions">
+            <button class="btn-export-download" id="btnDownloadExport">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download MP4 Video
+            </button>
+
+            <a href="#" target="_blank" class="btn-export-opencut" id="btnOpenCutImport" style="display: none;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              Open in OpenCut
+            </a>
+
+            <button class="btn-export-close-done" id="btnCloseComplete">Done</button>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="sfx-engine.js"></script>
+  <!-- Project Browser Modal -->
+  <div id="projectModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content project-browser">
+      <div class="modal-header">
+        <h2>Open Project</h2>
+        <button id="btnCloseProjectModal" class="btn-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="projectList" class="project-list">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/editor.js"></script>
+</body>
+</html>
