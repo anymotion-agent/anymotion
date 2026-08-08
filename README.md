@@ -34,11 +34,10 @@ Both drive the same Puppeteer + `window.seek(t)` contract the renderer uses, so 
 
 ### Quick Install (Recommended)
 
-```bash
-# Install globally from NPM
-npm install -g anymotion
+Install globally directly from GitHub:
 
-# Or install directly from GitHub
+```bash
+# Install globally from GitHub repository
 npm install -g 4liusman/anymotion
 
 # Run setup wizard (configures provider, API key & model)
