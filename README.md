@@ -195,7 +195,20 @@ The agent writes real files and can run shell commands, so both go through [src/
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Run `npm test` before opening a PR.
+Anymotion is an open-source project and we welcome contributions of all kinds — from adding new motion skills and expanding LLM provider support to fixing bugs and refining the CLI UI studio.
+
+### Quick Developer Setup
+
+```bash
+git clone https://github.com/4liusman/anymotion.git
+cd anymotion
+npm install
+npm link          # links your local development build to your global PATH
+
+anymotion doctor  # verifies local dev setup
+```
+
+Check out our complete [CONTRIBUTING.md](CONTRIBUTING.md) for codebase architecture maps, skill matrix authoring guides, and pull request guidelines.
 
 ---
 
