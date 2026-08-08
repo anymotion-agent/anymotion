@@ -32,16 +32,13 @@ Both drive the same Puppeteer + `window.seek(t)` contract the renderer uses, so 
 
 **Requirements:** Node.js 18+ (and FFmpeg for MP4 video export).
 
-### Quick Install (Recommended)
+### Quick Install
 
-Run Anymotion directly using `npx` or install globally via `npm`:
+Install globally directly from GitHub:
 
 ```bash
-# Initialize and run directly with npx
-npx anymotion@latest init
-
-# Or install globally
-npm install -g anymotion-cli
+# Install globally directly from GitHub repo
+npm install -g 4liusman/anymotion
 
 # Run setup wizard (configures provider, API key & model)
 anymotion setup
