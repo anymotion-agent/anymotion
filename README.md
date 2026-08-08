@@ -80,8 +80,8 @@ An environment key fills in for a placeholder but never overwrites a real saved 
 | --- | --- |
 | `anymotion` | Conversational agent REPL — the main way to use it |
 | `anymotion generate "<prompt>"` | One-shot generation into a new project folder |
-| `anymotion generate "<prompt>" --serve` | Generate, then open the live editor (off by default — see [Web editor](#web-editor)) |
-| `anymotion serve` | Live editor at `http://localhost:3000` (off by default) |
+| `anymotion render` | Export to MP4 (`-r 720p\|1080p\|1440p\|4k`, `-f <fps>`) |
+| `anymotion serve` | Web Studio Editor (Coming Soon 🚀) |
 | `anymotion render` | Export to MP4 (`-r 720p\|1080p\|1440p\|4k`, `-f <fps>`) |
 | `anymotion projects` | List every generated project, marking the active one |
 | `anymotion config [key] [value]` | View or change settings (secrets shown masked) |
@@ -128,25 +128,10 @@ The stage is `1920×1080`, `#stage`.
 
 ---
 
-## Web editor
+## Web Studio Editor (Coming Soon 🚀)
 
-**Off by default.** It is being reworked before release, so nothing in a run starts it: a
-finished build hands back the project folder and the rendered MP4, and neither needs a
-server. Preview by opening the project's `index.html` in a browser.
+The interactive Web Studio editor is currently being upgraded and will be released in an upcoming update. Currently, Anymotion outputs clean HTML5 compositions, beat-sheets, and 1080p 60fps MP4 renders directly into your project directory.
 
-To switch it on:
-
-```bash
-anymotion config editorEnabled true    # or ANYMOTION_EDITOR=1 for one run
-anymotion serve                        # http://localhost:3000
-```
-
-With it enabled you get:
-
-- Timeline scrubber driving `window.seek(t)`
-- Text and theme inspector for the active composition
-- Hot reload over SSE — edit a file in your own editor and the preview updates
-- One-click render at 720p / 1080p / 1440p / 4K
 
 ---
 
