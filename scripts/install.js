@@ -228,6 +228,11 @@ export async function runDoctor() {
  * The key is read without echo and never printed back.
  */
 export async function runSetup(options = {}) {
+  // Ensure base installation (skills, config directory) is done before setup wizard
+  console.log(chalk.dim('  Checking installation...'));
+  await runInstall();
+  console.log('');
+
   const current = loadConfig();
   const configPath = resolveConfigPath();
 

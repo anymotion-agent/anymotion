@@ -1,6 +1,6 @@
 {
   "name": "@anymotion-agent/anymotion",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Anymotion — AI motion graphics agent for the terminal. Describe an animation, get a rendered MP4: planned, built, and visually checked by the agent itself.",
   "main": "bin/motion-cli.js",
   "type": "module",
