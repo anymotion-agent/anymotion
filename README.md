@@ -48,7 +48,7 @@ anymotion setup
 ### Install from Source
 
 ```bash
-git clone https://github.com/4liusman/anymotion.git
+git clone https://github.com/anymotion-agent/anymotion.git
 cd anymotion
 npm install
 npm link          # makes `anymotion` available globally
@@ -200,7 +200,7 @@ Anymotion is an open-source project and we welcome contributions of all kinds â€
 ### Quick Developer Setup
 
 ```bash
-git clone https://github.com/4liusman/anymotion.git
+git clone https://github.com/anymotion-agent/anymotion.git
 cd anymotion
 npm install
 npm link          # links your local development build to your global PATH

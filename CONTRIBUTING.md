@@ -112,7 +112,7 @@ anymotion-cli/
    ```
 
 4. **Open a Pull Request:**
-   - Head to [github.com/4liusman/anymotion](https://github.com/4liusman/anymotion) and click **New Pull Request**.
+   - Head to [github.com/anymotion-agent/anymotion](https://github.com/anymotion-agent/anymotion) and click **New Pull Request**.
    - Provide a concise description of your changes and any screenshots/videos if applicable.
 
 ---
@@ -120,7 +120,7 @@ anymotion-cli/
 ## 💬 Community & Questions
 
 Got questions or ideas?
-- Open an **Issue** or **Discussion** on GitHub: [github.com/4liusman/anymotion/issues](https://github.com/4liusman/anymotion/issues)
+- Open an **Issue** or **Discussion** on GitHub: [github.com/anymotion-agent/anymotion/issues](https://github.com/anymotion-agent/anymotion/issues)
 - Creator: **Ali Usman** ([aliusman.site](https://aliusman.site) • [@aliusm_n](https://twitter.com/aliusm_n))
 
 Thank you for building the future of autonomous AI motion graphics with us! ✨
