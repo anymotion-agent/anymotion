@@ -60,6 +60,6 @@
     "cors": "^2.8.6",
     "express": "^4.19.2",
     "inquirer": "^9.2.15",
-    "puppeteer": "^22.6.0"
+    "puppeteer": "^24.15.0"
   }
 }
