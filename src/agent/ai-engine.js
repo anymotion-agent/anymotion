@@ -288,7 +288,7 @@ function translateOpenRouterModel(rawModel) {
 // ============================================================
 async function callOpenAICompatible(prompt, config, opts = {}) {
   const apiKey = config.apiKey;
-  const provider = (config.provider || 'openrouter').toLowerCase();
+  const provider = (inferProvider(config) === 'agentrouter' ? 'openrouter' : inferProvider(config));
   const baseUrl = resolveBaseUrl(config);
 
   const rawModel = opts.model || config.model || 'gpt-4o';
@@ -584,7 +584,7 @@ async function runOpenAIToolLoop({ prompt, config, opts, model }) {
 }
 
 export async function callAIProvider(prompt, config, opts = {}) {
-  const provider = (config.provider || 'agentrouter').toLowerCase();
+  const provider = inferProvider(config);
   if (provider === 'anthropic' || provider === 'agentrouter') {
     return callClaudeAnthropic(prompt, config, opts);
   } else {

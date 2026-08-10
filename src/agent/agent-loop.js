@@ -218,7 +218,7 @@ function makeClient(config) {
  */
 export async function fetchOpenAIAgentStream(params, config, signal, emit) {
   const baseUrl = resolveBaseUrl(config);
-  const provider = (config.provider || 'agentrouter').toLowerCase();
+  const provider = inferProvider(config);
 
   const apiKey = config.apiKey;
 
@@ -827,9 +827,28 @@ function isTransient(err) {
  * fetch, and the error formatter — and they had already drifted, so an error could name
  * a different host than the one the request actually went to. One copy, one answer.
  */
+
+export function inferProvider(config = {}) {
+  let url = (config.apiEndpoint || '').trim().toLowerCase();
+  if (url.includes('openrouter.ai')) return 'openrouter';
+  if (url.includes('opencode.ai')) return 'opencode';
+  if (url.includes('groq.com')) return 'groq';
+  if (url.includes('deepseek.com')) return 'deepseek';
+  if (url.includes('together.xyz')) return 'together';
+  if (url.includes('openai.com')) return 'openai';
+  if (url.includes('tokenrouter.com')) return 'tokenrouter';
+  if (url.includes('anthropic.com')) return 'anthropic';
+  if (url.includes('agentrouter.org')) return 'agentrouter';
+  if (config.provider) {
+    const p = String(config.provider).trim().toLowerCase();
+    if (p) return p;
+  }
+  return 'agentrouter';
+}
+
 export function resolveBaseUrl(config = {}) {
-  const provider = (config.provider || 'agentrouter').toLowerCase();
   let baseUrl = (config.apiEndpoint || '').trim().replace(/\/$/, '');
+  const provider = inferProvider(config);
 
   const KNOWN = {
     openrouter:     'https://openrouter.ai/api/v1',
@@ -844,22 +863,6 @@ export function resolveBaseUrl(config = {}) {
     agentrouter:    'https://agentrouter.org',
     anthropic:      'https://api.anthropic.com'
   };
-
-  if (provider !== 'agentrouter') {
-    // An endpoint belonging to a *different* provider is stale config, not a choice. The
-    // default config ships apiEndpoint = api.anthropic.com, so selecting openrouter left
-    // every request going to Anthropic's host carrying an openrouter key — a 401 that
-    // reads as a bad key, and the only way out was setting the endpoint by hand. Only
-    // agentrouter.org counted as stale before; every other known host was taken at face
-    // value. A genuinely custom endpoint is in nobody's KNOWN list, so it still wins.
-    const lower = baseUrl.toLowerCase();
-    const belongsToAnother = Object.entries(KNOWN)
-      .some(([p, url]) => p !== provider && lower === url);
-
-    if (!baseUrl || lower.includes('agentrouter.org') || belongsToAnother) {
-      return KNOWN[provider] || 'https://openrouter.ai/api/v1';
-    }
-  }
 
   if (!baseUrl) {
     return KNOWN[provider] || 'https://agentrouter.org';
@@ -1071,7 +1074,7 @@ export async function runAgentLoop(o) {
     while (attempt <= MAX_RETRIES && !finalMsg) {
       narration = narration.slice(0, narrationMark);
       try {
-        const provider = (config.provider || 'agentrouter').toLowerCase();
+        const provider = inferProvider(config);
         if (provider === 'anthropic' || provider === 'agentrouter') {
           const stream = await client.messages.stream(params, signal ? { signal } : undefined);
           await withStallGuard(stream, (event) => {
@@ -1135,7 +1138,7 @@ export async function runAgentLoop(o) {
           emit({ type: 'error', text: explained, fatal: true });
           logError(project?.dir, {
             model,
-            provider: config.provider || 'agentrouter',
+            provider: inferProvider(config),
             status: err.status || err.statusCode,
             message: err.message,
             explained,

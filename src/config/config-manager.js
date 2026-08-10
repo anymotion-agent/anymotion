@@ -38,13 +38,27 @@ export function resolveConfigPath() {
 /** Kept as a named export because the CLI prints it in `config` and `doctor`. */
 export const CONFIG_PATH = resolveConfigPath();
 
+export function resolveProvider(config = {}) {
+  if (config.provider && String(config.provider).trim()) {
+    return String(config.provider).trim().toLowerCase();
+  }
+  const endpoint = String(config.apiEndpoint || '').toLowerCase();
+  if (endpoint.includes('openrouter')) return 'openrouter';
+  if (endpoint.includes('opencode')) return 'opencode';
+  if (endpoint.includes('groq')) return 'groq';
+  if (endpoint.includes('deepseek')) return 'deepseek';
+  if (endpoint.includes('together')) return 'together';
+  if (endpoint.includes('openai')) return 'openai';
+  if (endpoint.includes('tokenrouter')) return 'tokenrouter';
+  if (endpoint.includes('anthropic')) return 'anthropic';
+  if (endpoint.includes('agentrouter')) return 'agentrouter';
+  return 'agentrouter';
+}
+
 /** Values used when no config file exists at all. */
 export function defaultConfig() {
   return {
     apiKey: '',
-    // Empty means "let resolveBaseUrl pick the host for whatever provider is set". A
-    // hardcoded default here is what made switching provider a two-step job: the stored
-    // Anthropic URL outlived the switch and the new key went to the old host.
     apiEndpoint: process.env.ANTHROPIC_BASE_URL || '',
     model: process.env.ANTHROPIC_MODEL || 'claude-opus-5',
     effortLevel: 'high',
@@ -56,14 +70,8 @@ export function defaultConfig() {
     projectFile: './index.html',
     themePreset: 'dark-glass',
     fileApprovalMode: 'manual',
-    provider: 'anthropic',
-    // The web editor still ships in the tree, but nothing in a run reaches for it. It is
-    // being reworked before it goes out to the public, and a finished build that opened a
-    // server and threw a browser tab at the user was shipping that unfinished surface as
-    // if it were done. Turn it back on with editorEnabled or ANYMOTION_EDITOR=1.
+    provider: '', // Auto-detected from apiEndpoint if omitted
     editorEnabled: false,
-    // Where new projects are created. Empty means "use the default under the home
-    // directory" — /cd writes an absolute path here so the choice survives a restart.
     projectsDir: ''
   };
 }
@@ -132,6 +140,7 @@ export function loadConfig() {
   }
 
   const merged = { ...base, ...parsed };
+  merged.provider = resolveProvider(merged);
 
   // The environment wins over a placeholder but never over a real stored value, so
   // exporting a key in one shell does not permanently change the saved config.
