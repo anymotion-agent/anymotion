@@ -6,6 +6,8 @@ Built by [Ali Usman](https://aliusman.site) — AI product builder and product m
 
 Describe an animation in plain language. Anymotion plans it, writes the HTML/CSS/JS, *looks at what it built* with a headless browser, fixes what is wrong, and renders a 1080p MP4.
 
+Visit the official landing page: [anymotion.art](https://anymotion.art)
+
 ```
 anymotion
 › Build a 20-second SaaS analytics explainer, dark glass UI, teal accent
@@ -37,6 +39,9 @@ Both drive the same Puppeteer + `window.seek(t)` contract the renderer uses, so 
 ```bash
 # Install globally from NPM
 npm install -g @anymotion-agent/anymotion
+
+# Or install directly from GitHub
+npm install -g git+https://github.com/anymotion-agent/anymotion.git
 
 # Or initialize directly via npx
 npx @anymotion-agent/anymotion@latest init
