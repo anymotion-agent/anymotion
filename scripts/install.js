@@ -34,12 +34,12 @@ export const MIN_NODE_MAJOR = 18;
 
 /** Providers the agent loop knows how to talk to. */
 export const PROVIDERS = [
-  { id: 'anthropic', label: 'Anthropic (official API)', env: 'ANTHROPIC_API_KEY' },
-  { id: 'openrouter', label: 'OpenRouter', env: 'OPENROUTER_API_KEY' },
-  { id: 'agentrouter', label: 'AgentRouter proxy', env: 'ANTHROPIC_AUTH_TOKEN' },
-  { id: 'opencode-zen', label: 'OpenCode Zen', env: 'ANYMOTION_API_KEY' },
-  { id: 'groq', label: 'Groq', env: 'ANYMOTION_API_KEY' },
-  { id: 'openai', label: 'OpenAI', env: 'OPENAI_API_KEY' }
+  { id: 'anthropic', label: 'Anthropic (official API)', env: 'ANTHROPIC_API_KEY', endpoint: 'https://api.anthropic.com' },
+  { id: 'openrouter', label: 'OpenRouter', env: 'OPENROUTER_API_KEY', endpoint: 'https://openrouter.ai/api/v1' },
+  { id: 'agentrouter', label: 'AgentRouter proxy', env: 'ANTHROPIC_AUTH_TOKEN', endpoint: 'https://agentrouter.org' },
+  { id: 'opencode-zen', label: 'OpenCode Zen', env: 'ANYMOTION_API_KEY', endpoint: 'https://opencode.ai/zen/v1' },
+  { id: 'groq', label: 'Groq', env: 'ANYMOTION_API_KEY', endpoint: 'https://api.groq.com/openai/v1' },
+  { id: 'openai', label: 'OpenAI', env: 'OPENAI_API_KEY', endpoint: 'https://api.openai.com/v1' }
 ];
 
 const ok = (m) => console.log(`  ${chalk.green('✔')} ${m}`);
@@ -283,9 +283,8 @@ export async function runSetup(options = {}) {
 
     const updates = {
       provider: provider.id,
-      // Clearing apiEndpoint lets resolveBaseUrl pick the right host for the provider
-      // instead of keeping a previous provider's URL.
-      apiEndpoint: '',
+      // Set apiEndpoint to the provider's default endpoint.
+      apiEndpoint: provider.endpoint || '',
       model: model || defaultConfig().model,
       defaultResolution: ['720p', '1080p', '1440p', '2k', '4k'].includes(resolution) ? resolution : '1080p',
       fps: Number.isFinite(parseInt(fpsAnswer, 10)) ? parseInt(fpsAnswer, 10) : 60,
