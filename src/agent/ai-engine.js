@@ -6,7 +6,7 @@ import { extractBrand, formatBrand } from './tools/web-tools.js';
 import { researchBrief, hasUrl } from './research.js';
 import { skillSearchRoots, skillCatalogue } from './skills.js';
 import { resetFileMemory } from './tools/fs-tools.js';
-import { runAgentLoop, resolveTokenPlan, resolveBaseUrl, withStallGuard, dropDanglingToolUse, prepareCachedRequest, fetchOpenAIAgentStream } from './agent-loop.js';
+import { runAgentLoop, resolveTokenPlan, resolveBaseUrl, withStallGuard, dropDanglingToolUse, prepareCachedRequest, fetchOpenAIAgentStream, inferProvider } from './agent-loop.js';
 
 // ============================================================
 // SYSTEM PROMPTS — Motion Graphics AI Agent (SKILL-aware)
