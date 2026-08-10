@@ -11,6 +11,6 @@ Please see below for the versions of Anymotion that are currently being supporte
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability within this project, please send an e-mail to Ali Usman at [hi@aliusman.site]. All security vulnerabilities will be promptly addressed.
+If you discover a security vulnerability within this project, please send an e-mail to Ali Usman at [the4liusman@gmail.com]. All security vulnerabilities will be promptly addressed.
 
 We will try to acknowledge your report within 48 hours, and will provide a timeline for a fix. Please do not report security vulnerabilities through public GitHub issues.
