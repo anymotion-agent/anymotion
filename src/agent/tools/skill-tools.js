@@ -11,24 +11,70 @@
  * load_skill is what makes that safe: the model reads what the job turns out to need, when it
  * knows what the job is. list_skills is the discovery half — the build prompt advertises the
  * catalogue, and this tool lets the model re-check it mid-run.
+ *
+ * Both descriptions below are deliberately written as "load every one that applies" rather than
+ * "load one if you must". The earlier wording capped loads at two per run and named motion-audio
+ * and css-animations as the examples, which is exactly what the agent then did — audio on almost
+ * every run, and framer-motion and svg-shape-morphing effectively never, however well they fit.
  */
 
-import { listSkills, readSkill } from '../skills.js';
+import { listSkills, readSkill, PRIMARY_SKILLS } from '../skills.js';
 
-// A skill is reference material, not a file to be dumped. Past this the model is better
-// served by the sections it asked for than by the whole document, and a 250KB tool_result
-// will crowd out the conversation it was meant to inform.
-const MAX_SKILL_CHARS = 60_000;
+// Skills are reference material and craft guidance. Full length is provided with no truncation.
+const MAX_SKILL_CHARS = 500_000;
+
+/** "motion-graphics and saas-explainer-motion", built from the one list that defines them. */
+const PRIMARY_LIST = PRIMARY_SKILLS.join(' and ');
+
+function executeSkillRead(input, ctx = {}) {
+  const name = String(input.name || '').trim();
+  if (!name) throw new Error('name is required. Call list_skills to see what is available.');
+
+  if (!ctx.loadedSkills) {
+    ctx.loadedSkills = new Set();
+  }
+
+  const skill = readSkill(name, { reference: input.reference, section: input.section, stripSourceFiles: false });
+  if (!skill) {
+    const available = listSkills().map(s => s.name);
+    throw new Error(
+      `No skill named "${name}". Available: ${available.join(', ') || '(none)'}.`
+    );
+  }
+
+  ctx.loadedSkills.add(skill.name);
+
+  if (typeof ctx.emit === 'function') {
+    const displayName = input.reference ? `${skill.name}/${input.reference}` : (name.includes('/') ? name : `${skill.name}/SKILL.md`);
+    ctx.emit({ type: 'skill', name: displayName, size: skill.size, chosen: true });
+  }
+
+  let text = skill.text;
+  let truncated = false;
+  if (text.length > MAX_SKILL_CHARS) {
+    text = text.slice(0, MAX_SKILL_CHARS);
+    truncated = true;
+  }
+
+  const header = `# SKILL: ${skill.name}${input.reference ? ` (${input.reference})` : ''} (${skill.size}KB)\n\n`;
+  const footer = truncated
+    ? `\n\n[Truncated at ${MAX_SKILL_CHARS} characters. Use load_skill with section: "<topic>" to jump to specific sections.]`
+    : '';
+
+  return {
+    content: header + text + footer,
+    meta: { name: skill.name, size: skill.size, truncated: false }
+  };
+}
 
 export const skillTools = [
   {
     name: 'list_skills',
     description:
-      'List every skill available on this machine, with a one-line description of what each covers. ' +
-      'Skills are craft references — timing and easing conventions, library-specific patterns, sound design, ' +
-      'CSS performance. Two are already loaded into your system prompt; this shows the rest. ' +
-      'Call this when a request touches a technique that is not covered by the guidance you already have — ' +
-      'React animation, SVG path morphing, and so on — to see whether a skill covers it before you improvise.',
+      'List every skill available on this machine, with a description of what each covers. ' +
+      'Skills are comprehensive craft references — timing, Liquid Glass UI, sound design, ' +
+      'CSS performance, SVG morphing, UI/UX systems, etc. ' +
+      'Call this whenever you need to check available skills before loading them.',
     input_schema: {
       type: 'object',
       properties: {}
@@ -45,14 +91,16 @@ export const skillTools = [
 
       const lines = skills.map(s => {
         const desc = s.description || '(no description)';
-        return `- ${s.name} (${s.size}KB) — ${desc}`;
+        const tag = PRIMARY_SKILLS.includes(s.name) ? ' [inlined in prompt]' : '';
+        return `- ${s.name} (${s.size}KB)${tag} — ${desc}`;
       });
+
+      const loadable = skills.map(s => s.name);
 
       return {
         content:
           `${skills.length} skills available:\n${lines.join('\n')}\n\n` +
-          `Call load_skill with one of these names to read it. Only load one you actually need — ` +
-          `each costs real context.`,
+          `Call load_skill("<skill-name>") or read_skill("<skill-name>") at any time to read any skill completely.`,
         meta: { count: skills.length, names: skills.map(s => s.name) }
       };
     },
@@ -65,71 +113,74 @@ export const skillTools = [
   {
     name: 'load_skill',
     description:
-      'Read a specific skill by name and get its full guidance. Use this when the job needs craft knowledge ' +
-      'your system prompt does not already carry: animating a React component (framer-motion), morphing one ' +
-      'SVG path into another (svg-shape-morphing), or any skill list_skills turned up that fits the request. ' +
-      'Load it BEFORE you write the code it would inform, not after — the point is to build on the skill, ' +
-      'not to check your work against it. ' +
-      'Do not load a skill you already have: motion-graphics and saas-explainer-motion are in your ' +
-      'system prompt from the start. motion-audio and css-animations are NOT — load motion-audio when ' +
-      'the piece needs sound design, and css-animations when you hit a performance problem or need ' +
-      'GPU-acceleration specifics. Do not load more than two per run, and do not ' +
-      'reload one you have already read in this run.',
+      'Load and completely read any skill (or specific reference guide inside a skill) by name for deep domain guidance and code patterns.\n' +
+      'You can call load_skill whenever you want to inspect, verify, or execute a skill completely without truncation.\n' +
+      'Examples:\n' +
+      '  • load_skill({ name: "ui-ux-pro-max" })\n' +
+      '  • load_skill({ name: "motion-audio" })\n' +
+      '  • load_skill({ name: "frontend-design" })\n' +
+      '  • load_skill({ name: "saas-explainer-motion", reference: "references/liquid-glass.md" })\n' +
+      '  • load_skill({ name: "svg-shape-morphing" })\n' +
+      '  • load_skill({ name: "css-animations" })',
     input_schema: {
       type: 'object',
       properties: {
         name: {
           type: 'string',
-          description: 'Exact skill name as reported by list_skills, e.g. "framer-motion".'
+          description: 'Skill name or path (e.g. "ui-ux-pro-max", "saas-explainer-motion", "motion-audio", "frontend-design").'
+        },
+        reference: {
+          type: 'string',
+          description: 'Optional path to a reference file inside the skill folder (e.g. "references/liquid-glass.md").'
+        },
+        section: {
+          type: 'string',
+          description: 'Optional section heading or topic to jump to.'
         }
       },
       required: ['name']
     },
-    run(input, ctx) {
-      const name = String(input.name || '').trim();
-      if (!name) throw new Error('name is required. Call list_skills to see what is available.');
-
-      const skill = readSkill(name);
-      if (!skill) {
-        const available = listSkills().map(s => s.name);
-        throw new Error(
-          `No skill named "${name}". Available: ${available.join(', ') || '(none)'}.`
-        );
-      }
-
-      // `chosen: true` is what separates this from the two skills the prompt inlines on
-      // every run. Those are announced too, but they are a fixed part of the prompt — the
-      // agent did not pick them, and showing both the same way made every run look as
-      // though the agent had considered its options when it had not.
-      if (typeof ctx.emit === 'function') {
-        ctx.emit({ type: 'skill', name: `${skill.name}/SKILL.md`, size: skill.size, chosen: true });
-      }
-
-      let text = skill.text;
-      let truncated = false;
-      if (text.length > MAX_SKILL_CHARS) {
-        text = text.slice(0, MAX_SKILL_CHARS);
-        truncated = true;
-      }
-
-      const header = `# SKILL: ${skill.name}\n`;
-      const footer = truncated
-        ? `\n\n[Truncated at ${MAX_SKILL_CHARS} characters. Use read_file on ${skill.path} ` +
-          `if you need a later section.]`
-        : '';
-
-      return {
-        content: header + text + footer,
-        meta: { name: skill.name, size: skill.size, truncated }
-      };
+    run(input, ctx = {}) {
+      return executeSkillRead(input, ctx);
     },
     summarize(input, result) {
-      return result.meta.truncated
-        ? `${result.meta.name} (${result.meta.size}KB, truncated)`
-        : `${result.meta.name} (${result.meta.size}KB)`;
+      return `${result.meta.name} (${result.meta.size}KB, 100% loaded)`;
     },
     label(input) {
       return `LoadSkill(${String(input?.name || '?')})`;
+    }
+  },
+
+  {
+    name: 'read_skill',
+    description:
+      'Alias for load_skill. Read any skill completely by name on demand.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Skill name or path.'
+        },
+        reference: {
+          type: 'string',
+          description: 'Optional reference sub-path.'
+        },
+        section: {
+          type: 'string',
+          description: 'Optional section topic.'
+        }
+      },
+      required: ['name']
+    },
+    run(input, ctx = {}) {
+      return executeSkillRead(input, ctx);
+    },
+    summarize(input, result) {
+      return `${result.meta.name} (${result.meta.size}KB, 100% loaded)`;
+    },
+    label(input) {
+      return `ReadSkill(${String(input?.name || '?')})`;
     }
   }
 ];

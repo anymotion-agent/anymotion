@@ -493,19 +493,23 @@ export class Tui {
   /**
    * A skill entering context.
    *
-   * Two different things used to print this identical line. The agent calling load_skill
-   * because the job turned out to need sound design is a decision worth seeing. The two
-   * skills the prompt inlines on every single run are not — they are fixed furniture, and
-   * dressing them as "Analyzing" made the agent look like it was choosing when it wasn't.
-   * So the chosen one keeps the announcement, and the automatic ones say what they are.
+   * Only real loads reach here now. The two skills the prompt inlines on every run used to
+   * print through this same method with `chosen` false, which rendered "Skill loaded:
+   * motion-graphics/SKILL.md" — a line describing no decision and no work, since those two
+   * are a fixed part of the prompt the agent never picked. ai-engine no longer emits for
+   * them, so what is left is either a skill the agent asked for by name through load_skill
+   * (`chosen`), or a genuine by-name read of something outside the primary pair.
+   *
+   * `chosen` keeps the brighter treatment because "the agent decided it needed this" is worth
+   * more on screen than "this file was read", but both are now true events.
    */
   skill(name, size, chosen = false) {
     this.thinkEnd();
     this.narrateEnd();
-    const label = chosen ? 'Analyzing skill: ' : 'Skill loaded: ';
     const mark = chosen ? c.brandBold('◆ ') : c.dim('◇ ');
+    const label = c.accent('Analyzing skill: ');
     const shown = chosen ? c.white(name) : c.muted(name);
-    this.push(c.dim('  ' + RAIL + ' ') + mark + (chosen ? c.accent(label) : c.muted(label)) + shown + c.dim(` (${size}KB)`));
+    this.push(c.dim('  ' + RAIL + ' ') + mark + label + shown + c.dim(` (${size}KB)`));
   }
 
   /**
@@ -1299,8 +1303,13 @@ export class Tui {
     out.push(truncate(hint, W));
 
     // Single write: assembling the frame first avoids visible tearing.
-    let frame = CSI + 'H' + CSI + 'J';
-    frame += out.slice(0, H).join('\n');
+    // Use CSI + 'H' without full-screen clear (CSI + 'J') to eliminate strobe/flicker,
+    // and truncate each line to W - 1 with CSI + 'K' (erase to EOL) to prevent auto-wrap bounce.
+    const capped = out.slice(0, H).map(line => truncate(line, Math.max(10, W - 1)) + CSI + 'K');
+    while (capped.length < H) {
+      capped.push(CSI + 'K');
+    }
+    const frame = CSI + 'H' + capped.join('\n');
     process.stdout.write(frame);
 
     // Park the real cursor inside the composer so typing feels native.

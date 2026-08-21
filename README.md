@@ -15,6 +15,17 @@ anymotion
 
 ---
 
+## What's New in v1.1.0 (Major Update)
+
+- **🎨 Brand-Adaptive Semantic Theme Engine:** Automatically detects Dark/Light mode, extracts official brand palettes, and maps semantic color roles (`--bg-primary`, `--bg-secondary`, `--accent-primary`, `--accent-secondary`, contrast text).
+- **✨ Modern Brand-Customized Cursor System:** Replaced generic retro arrows with sleek precision stealth pointers, frosted glass avatar badges (`backdrop-filter: blur(12px)`), and kinetic click ripple waves.
+- **🛡️ Zero-Bug First-Pass Architecture:** Strict engineering standards that guarantee bulletproof scene isolation, 100% pure deterministic `window.seek(t)`, and centered 1920×1080 stage bounds from turn 1.
+- **⚡ Interactive 60fps Playback Engine:** In-browser 60fps `requestAnimationFrame` loop, Spacebar keyboard shortcut, Play/Pause toggle, and real-time scrubber synchronization.
+- **⏱️ Smart Duration Normalization:** Auto-converts millisecond/second units (e.g., `25000ms` → `25s`) and bounds clamps in the MP4 video renderer, preventing frame calculation freezes.
+- **📊 Pre-Plan Action Transparency:** Live step-by-step terminal narration during website scraping, brand asset probing, craft intelligence loading, and beat-sheet choreography synthesis.
+
+---
+
 ## Why it is not just a code agent
 
 A general coding agent writing an animation is working blind. The HTML parses, the CSS is valid, and the result is still a card sitting on top of a headline at 3.2 seconds. Nothing in the source says so.
@@ -77,9 +88,36 @@ Only `anymotion render` needs it. Everything else works without it.
 
 ## Bring your own API key
 
-Anymotion ships with no credentials. `anymotion setup` reads your key without echoing it and stores it in `~/.anymotion/motion.config.json`, which is outside the repo and gitignored anyway. `anymotion config` masks it on the way back out, so pasting your terminal into a bug report is safe.
+Anymotion ships with no credentials. `anymotion setup` reads your key without echoing it and stores it in `~/.anymotion/motion.config.json`, which is outside the repo and gitignored. `anymotion config` masks it on output, so sharing your terminal is always safe.
 
-Supported providers: **Anthropic**, OpenRouter, AgentRouter, OpenCode Zen, Groq, DeepSeek, Together, OpenAI, TokenRouter.
+### Supported AI Providers (22+ Ready)
+
+Anymotion supports all major official APIs, high-speed routing gateways, and local offline models:
+
+| Provider | Endpoint | Environment Variable | Default Model |
+| --- | --- | --- | --- |
+| **Anthropic** | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | `claude-3-7-sonnet-20250219` |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `anthropic/claude-3.7-sonnet` |
+| **AgentRouter** | `https://agentrouter.org` | `ANTHROPIC_AUTH_TOKEN` | `claude-opus-5` |
+| **OpenCode Zen** | `https://opencode.ai/zen/v1` | `OPENCODE_API_KEY` | `deepseek-v4-flash-free` |
+| **OpenCode Go** | `https://opencode.ai/zen/go/v1` | `OPENCODE_API_KEY` | `deepseek-v4-flash-free` |
+| **TokenRouter** | `https://api.tokenrouter.com/v1` | `TOKENROUTER_API_KEY` | `gpt-4o` |
+| **OpenAI** | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-4o` |
+| **Groq** | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
+| **DeepSeek** | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
+| **Google Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | `gemini-2.0-flash` |
+| **xAI (Grok)** | `https://api.x.ai/v1` | `XAI_API_KEY` | `grok-2-latest` |
+| **Kie AI** | `https://api.kie.ai/v1` | `KIE_API_KEY` | `deepseek-chat` |
+| **PiAPI** | `https://api.piapi.ai/v1` | `PIAPI_API_KEY` | `gpt-4o` |
+| **Together AI** | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
+| **Mistral AI** | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` | `mistral-large-latest` |
+| **Fireworks AI** | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `llama-v3p3-70b-instruct` |
+| **Perplexity AI** | `https://api.perplexity.ai` | `PPLX_API_KEY` | `sonar-pro` |
+| **Cerebras** | `https://api.cerebras.ai/v1` | `CEREBRAS_API_KEY` | `llama-3.3-70b` |
+| **SambaNova** | `https://api.sambanova.ai/v1` | `SAMBANOVA_API_KEY` | `Meta-Llama-3.3-70B-Instruct` |
+| **SiliconFlow** | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` | `deepseek-ai/DeepSeek-V3` |
+| **Ollama (Local)** | `http://localhost:11434/v1` | `OLLAMA_API_KEY` | `llama3.3` |
+| **LM Studio (Local)** | `http://localhost:1234/v1` | `LM_STUDIO_API_KEY` | `local-model` |
 
 You can skip the config file entirely and use the environment instead:
 
@@ -118,8 +156,8 @@ Every generation gets its own folder, so a second request never overwrites the f
 ~/anymotion-projects/
   saas-analytics-explainer/
     index.html        the composition
-    style.css
-    script.js
+    style.css         glassmorphism & tokens
+    timeline.js       seek engine & animation logic
     project.json      prompt, plan, model, timestamps
     exports/          rendered MP4s for this project only
 ```

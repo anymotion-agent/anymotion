@@ -34,12 +34,28 @@ export const MIN_NODE_MAJOR = 18;
 
 /** Providers the agent loop knows how to talk to. */
 export const PROVIDERS = [
-  { id: 'anthropic', label: 'Anthropic (official API)', env: 'ANTHROPIC_API_KEY', endpoint: 'https://api.anthropic.com' },
-  { id: 'openrouter', label: 'OpenRouter', env: 'OPENROUTER_API_KEY', endpoint: 'https://openrouter.ai/api/v1' },
-  { id: 'agentrouter', label: 'AgentRouter proxy', env: 'ANTHROPIC_AUTH_TOKEN', endpoint: 'https://agentrouter.org' },
-  { id: 'opencode-zen', label: 'OpenCode Zen', env: 'ANYMOTION_API_KEY', endpoint: 'https://opencode.ai/zen/v1' },
-  { id: 'groq', label: 'Groq', env: 'ANYMOTION_API_KEY', endpoint: 'https://api.groq.com/openai/v1' },
-  { id: 'openai', label: 'OpenAI', env: 'OPENAI_API_KEY', endpoint: 'https://api.openai.com/v1' }
+  { id: 'anthropic', label: 'Anthropic', env: 'ANTHROPIC_API_KEY', endpoint: 'https://api.anthropic.com', defaultModel: 'claude-3-7-sonnet-20250219' },
+  { id: 'openrouter', label: 'OpenRouter', env: 'OPENROUTER_API_KEY', endpoint: 'https://openrouter.ai/api/v1', defaultModel: 'anthropic/claude-3.7-sonnet' },
+  { id: 'agentrouter', label: 'AgentRouter', env: 'ANTHROPIC_AUTH_TOKEN', endpoint: 'https://agentrouter.org', defaultModel: 'claude-opus-5' },
+  { id: 'opencode-zen', label: 'OpenCode Zen', env: 'ANYMOTION_API_KEY', endpoint: 'https://opencode.ai/zen/v1', defaultModel: 'deepseek-v4-flash-free' },
+  { id: 'opencode-go', label: 'OpenCode Go', env: 'ANYMOTION_API_KEY', endpoint: 'https://opencode.ai/zen/go/v1', defaultModel: 'deepseek-v4-flash-free' },
+  { id: 'tokenrouter', label: 'TokenRouter', env: 'TOKENROUTER_API_KEY', endpoint: 'https://api.tokenrouter.com/v1', defaultModel: 'gpt-4o' },
+  { id: 'openai', label: 'OpenAI', env: 'OPENAI_API_KEY', endpoint: 'https://api.openai.com/v1', defaultModel: 'gpt-4o' },
+  { id: 'groq', label: 'Groq', env: 'GROQ_API_KEY', endpoint: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
+  { id: 'deepseek', label: 'DeepSeek', env: 'DEEPSEEK_API_KEY', endpoint: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat' },
+  { id: 'gemini', label: 'Google Gemini', env: 'GEMINI_API_KEY', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.0-flash' },
+  { id: 'xai', label: 'xAI (Grok)', env: 'XAI_API_KEY', endpoint: 'https://api.x.ai/v1', defaultModel: 'grok-2-latest' },
+  { id: 'kie', label: 'Kie AI', env: 'KIE_API_KEY', endpoint: 'https://api.kie.ai/v1', defaultModel: 'deepseek-chat' },
+  { id: 'piapi', label: 'PiAPI', env: 'PIAPI_API_KEY', endpoint: 'https://api.piapi.ai/v1', defaultModel: 'gpt-4o' },
+  { id: 'together', label: 'Together AI', env: 'TOGETHER_API_KEY', endpoint: 'https://api.together.xyz/v1', defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
+  { id: 'mistral', label: 'Mistral AI', env: 'MISTRAL_API_KEY', endpoint: 'https://api.mistral.ai/v1', defaultModel: 'mistral-large-latest' },
+  { id: 'fireworks', label: 'Fireworks AI', env: 'FIREWORKS_API_KEY', endpoint: 'https://api.fireworks.ai/inference/v1', defaultModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct' },
+  { id: 'perplexity', label: 'Perplexity AI', env: 'PPLX_API_KEY', endpoint: 'https://api.perplexity.ai', defaultModel: 'sonar-pro' },
+  { id: 'cerebras', label: 'Cerebras', env: 'CEREBRAS_API_KEY', endpoint: 'https://api.cerebras.ai/v1', defaultModel: 'llama-3.3-70b' },
+  { id: 'sambanova', label: 'SambaNova', env: 'SAMBANOVA_API_KEY', endpoint: 'https://api.sambanova.ai/v1', defaultModel: 'Meta-Llama-3.3-70B-Instruct' },
+  { id: 'siliconflow', label: 'SiliconFlow', env: 'SILICONFLOW_API_KEY', endpoint: 'https://api.siliconflow.cn/v1', defaultModel: 'deepseek-ai/DeepSeek-V3' },
+  { id: 'ollama', label: 'Ollama (Local)', env: 'OLLAMA_API_KEY', endpoint: 'http://localhost:11434/v1', defaultModel: 'llama3.3' },
+  { id: 'lmstudio', label: 'LM Studio (Local)', env: 'LM_STUDIO_API_KEY', endpoint: 'http://localhost:1234/v1', defaultModel: 'local-model' }
 ];
 
 const ok = (m) => console.log(`  ${chalk.green('✔')} ${m}`);
@@ -275,7 +291,7 @@ export async function runSetup(options = {}) {
     console.log('');
 
     // --- Model ---------------------------------------------------------------
-    const model = await ask(rl, 'Model', current.model || defaultConfig().model);
+    const model = await ask(rl, 'Model', (current.provider === provider.id && current.model ? current.model : provider.defaultModel) || current.model || defaultConfig().model);
     const resolution = await ask(rl, 'Default resolution (720p/1080p/1440p/4k)', current.defaultResolution || '1080p');
     const fpsAnswer = await ask(rl, 'Frames per second', String(current.fps || 60));
     const portAnswer = await ask(rl, 'Editor port', String(current.port || 3000));

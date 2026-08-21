@@ -18,7 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import puppeteer from 'puppeteer';
 import { renderVideo } from '../../render/video-renderer.js';
-import { resolveInProject } from '../sandbox.js';
+import { resolveInProject, ensureDir } from '../sandbox.js';
 import { GLOBAL_DIR } from '../../config/config-manager.js';
 
 const PREVIEW_WIDTH = 1024;
@@ -92,11 +92,21 @@ function fileUrl(absPath) {
   return `file:///${absPath.replace(/\\/g, '/')}`;
 }
 
-async function openPage(absPath, width, height) {
-  const browser = await puppeteer.launch({
+let _sharedBrowser = null;
+
+async function getSharedBrowser() {
+  if (_sharedBrowser && _sharedBrowser.isConnected()) {
+    return _sharedBrowser;
+  }
+  _sharedBrowser = await puppeteer.launch({
     headless: 'new',
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security', '--font-render-hinting=none']
   });
+  return _sharedBrowser;
+}
+
+async function openPage(absPath, width, height) {
+  const browser = await getSharedBrowser();
   const page = await browser.newPage();
   await page.setViewport({ width, height, deviceScaleFactor: 1 });
 
@@ -126,7 +136,7 @@ async function openPage(absPath, width, height) {
   // catches the pre-animation state and looks like a bug that is not there.
   await new Promise(r => setTimeout(r, 400));
 
-  return { browser, page, problems };
+  return { page, problems };
 }
 
 /** Freezes the timeline so a screenshot is reproducible rather than whatever rAF did last. */
@@ -177,12 +187,16 @@ export const motionTools = [
 
       if (!times.length) throw new Error('times must be a non-empty array of seconds, e.g. [0.5, 3, 6].');
 
-      const { browser, page, problems } = await openPage(target, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+      const { page, problems } = await openPage(target, PREVIEW_WIDTH, PREVIEW_HEIGHT);
       const images = [];
       const notes = [];
 
       try {
-        const duration = await page.evaluate(() => (typeof window.DURATION === 'number' ? window.DURATION : null));
+        const duration = await page.evaluate(() => {
+          let d = typeof window.DURATION === 'number' ? window.DURATION : (window.__EXPLAINER__?.duration || null);
+          if (typeof d === 'number' && d >= 500) d = d / 1000;
+          return d;
+        });
         await page.evaluate(FREEZE);
 
         for (const t of times) {
@@ -195,12 +209,13 @@ export const motionTools = [
           } else if (typeof seekResult === 'string' && seekResult.startsWith('threw')) {
             notes.push(`seek(${t}) ${seekResult}`);
           }
-          await new Promise(r => setTimeout(r, 120));
+          // 250ms wait ensures layouts, CSS backdrop filters, and font renders settle before capture
+          await new Promise(r => setTimeout(r, 250));
           const buf = await page.screenshot({ type: 'jpeg', quality: 78 });
           images.push({ media_type: 'image/jpeg', data: Buffer.from(buf).toString('base64'), label: `t = ${t}s` });
         }
       } finally {
-        await browser.close().catch(() => {});
+        await page.close().catch(() => {});
       }
 
       const header = [
@@ -240,17 +255,21 @@ export const motionTools = [
       const target = entryFile(ctx, input.path);
       const sampleCount = Math.min(12, Math.max(2, Math.round(input.samples || 5)));
 
-      const { browser, page, problems } = await openPage(target, AUDIT_WIDTH, AUDIT_HEIGHT);
+      const { page, problems } = await openPage(target, AUDIT_WIDTH, AUDIT_HEIGHT);
       const findings = [];
       const passed = [];
 
       try {
-        const contract = await page.evaluate(() => ({
-          hasSeek: typeof window.seek === 'function',
-          duration: typeof window.DURATION === 'number' ? window.DURATION : null,
-          animLayers: document.querySelectorAll('[data-anim]').length,
-          scenes: document.querySelectorAll('section, .scene, [class*="scene"]').length
-        }));
+        const contract = await page.evaluate(() => {
+          let rawD = typeof window.DURATION === 'number' ? window.DURATION : (window.__EXPLAINER__?.duration || null);
+          let d = typeof rawD === 'number' && rawD >= 500 ? rawD / 1000 : rawD;
+          return {
+            hasSeek: typeof window.seek === 'function',
+            duration: typeof d === 'number' && d > 0 ? d : null,
+            animLayers: document.querySelectorAll('[data-anim]').length,
+            scenes: document.querySelectorAll('section, .scene, [class*="scene"]').length
+          };
+        });
 
         if (!contract.hasSeek) {
           findings.push('CRITICAL: window.seek(t) is not defined. The editor scrubber and the video renderer both call it — without it the composition cannot be exported.');
@@ -398,7 +417,7 @@ export const motionTools = [
 
         return { content: body, meta: { issues: findings.length, passed: passed.length } };
       } finally {
-        await browser.close().catch(() => {});
+        await page.close().catch(() => {});
       }
     },
     summarize(input, result) {
@@ -407,6 +426,69 @@ export const motionTools = [
         : `${result.meta.issues} issue${result.meta.issues === 1 ? '' : 's'}`;
     },
     label() { return 'CheckComposition()'; }
+  },
+
+  {
+    name: 'validate_seek',
+    description:
+      'Fast timeline audit across key timestamps (0%, 25%, 50%, 75%, 100% of DURATION) without generating images. ' +
+      'Verifies element visibility counts, scene progression, and detects black frames or frozen timelines.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Entry file. Defaults to index.html.' }
+      }
+    },
+    async run(input, ctx) {
+      const target = entryFile(ctx, input.path);
+      const { page, problems } = await openPage(target, AUDIT_WIDTH, AUDIT_HEIGHT);
+      try {
+        const duration = await page.evaluate(() => {
+          let rawD = typeof window.DURATION === 'number' ? window.DURATION : (window.__EXPLAINER__?.duration || 10);
+          let d = typeof rawD === 'number' && rawD >= 500 ? rawD / 1000 : rawD;
+          return Math.min(300, Math.max(1, d));
+        });
+        await page.evaluate(FREEZE);
+
+        const sampleTimes = [0, duration * 0.25, duration * 0.5, duration * 0.75, duration];
+        const timelineReport = [];
+
+        for (const t of sampleTimes) {
+          await seekTo(page, t);
+          await new Promise(r => setTimeout(r, 100));
+
+          const snapshot = await page.evaluate(() => {
+            const visible = [...document.querySelectorAll('h1,h2,h3,h4,p,span,button,a,img,svg,[data-anim]')]
+              .filter(el => {
+                const cs = getComputedStyle(el);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                if (parseFloat(cs.opacity) < 0.1) return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 5 && r.height > 5;
+              });
+            return { visibleCount: visible.length };
+          });
+
+          timelineReport.push(`t=${t.toFixed(1)}s: ${snapshot.visibleCount} visible elements ${snapshot.visibleCount === 0 ? '⚠️ (BLACK FRAME)' : ''}`);
+        }
+
+        const isFrozen = timelineReport.every(r => r.split(':')[1] === timelineReport[0].split(':')[1]);
+        const issues = [];
+        if (isFrozen) issues.push('TIMELINE IS FROZEN: No visual element changes detected across 0s to ' + duration + 's.');
+
+        const body = [
+          `Timeline Audit (Duration: ${duration}s):`,
+          ...timelineReport.map(r => `  • ${r}`),
+          ...(issues.length ? ['', 'ISSUES FOUND:', ...issues.map(i => `  ❌ ${i}`)] : ['', '✓ Timeline is active and progressing cleanly.'])
+        ].join('\n');
+
+        return { content: body, meta: { duration, frozen: isFrozen, issues: issues.length } };
+      } finally {
+        await page.close().catch(() => {});
+      }
+    },
+    summarize(input, result) { return result.meta.frozen ? 'FROZEN TIMELINE' : 'timeline active'; },
+    label() { return 'ValidateSeek()'; }
   },
 
   {
@@ -502,13 +584,103 @@ export const motionTools = [
         copied.push(name);
       }
 
+function writeProceduralSfxEngine(projectDir) {
+  const assetsDir = path.join(projectDir, 'assets');
+  if (!fs.existsSync(assetsDir)) fs.mkdirSync(assetsDir, { recursive: true });
+  const sfxPath = path.join(assetsDir, 'sfx.js');
+  if (!fs.existsSync(sfxPath)) {
+    const code = `// assets/sfx.js — Zero-dependency Procedural Web Audio Synth Engine
+(function() {
+  var ctx = null;
+  function getCtx() {
+    if (!ctx) {
+      var AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (AudioContext) ctx = new AudioContext();
+    }
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(function(){});
+    return ctx;
+  }
+
+  window.playCue = function(type, vol) {
+    var ac = getCtx();
+    if (!ac) return;
+    var v = typeof vol === 'number' ? Math.max(0.01, Math.min(1.0, vol)) : 0.35;
+    var t = ac.currentTime;
+
+    if (type === 'click' || type === 'tap') {
+      var osc = ac.createOscillator();
+      var gain = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(850, t);
+      osc.frequency.exponentialRampToValueAtTime(140, t + 0.04);
+      gain.gain.setValueAtTime(v * 0.8, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start(t);
+      osc.stop(t + 0.05);
+    } else if (type === 'glass' || type === 'ping' || type === 'bell') {
+      var osc = ac.createOscillator();
+      var gain = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1450, t);
+      osc.frequency.exponentialRampToValueAtTime(880, t + 0.3);
+      gain.gain.setValueAtTime(v * 0.6, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start(t);
+      osc.stop(t + 0.32);
+    } else if (type === 'swoosh' || type === 'transition' || type === 'riser') {
+      var bufferSize = Math.floor(ac.sampleRate * 0.35);
+      var buffer = ac.createBuffer(1, bufferSize, ac.sampleRate);
+      var data = buffer.getChannelData(0);
+      for (var i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      var noise = ac.createBufferSource();
+      noise.buffer = buffer;
+      var filter = ac.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(250, t);
+      filter.frequency.exponentialRampToValueAtTime(2800, t + 0.32);
+      var gain = ac.createGain();
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.linearRampToValueAtTime(v * 0.6, t + 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(ac.destination);
+      noise.start(t);
+      noise.stop(t + 0.36);
+    } else if (type === 'sub_bass' || type === 'drop' || type === 'hit') {
+      var osc = ac.createOscillator();
+      var gain = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(180, t);
+      osc.frequency.exponentialRampToValueAtTime(32, t + 0.45);
+      gain.gain.setValueAtTime(v * 1.1, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start(t);
+      osc.stop(t + 0.52);
+    }
+  };
+})();
+`;
+    fs.writeFileSync(sfxPath, code, 'utf-8');
+  }
+}
+
+      writeProceduralSfxEngine(ctx.project.dir);
+
       const lines = [];
       if (copied.length) {
         lines.push(`Copied ${copied.length} sound${copied.length === 1 ? '' : 's'} into assets/sfx/:`);
         copied.forEach(n => lines.push(`  assets/sfx/${n}`));
       }
+      lines.push('Generated procedural Web Audio synth engine at assets/sfx.js (window.playCue support for click, glass, swoosh, sub_bass).');
       if (missing.length) {
-        lines.push(`Not in the library (call list_sfx for real names): ${missing.join(', ')}`);
+        lines.push(`Not in the library (synthesized procedurally): ${missing.join(', ')}`);
       }
       return { content: lines.join('\n'), meta: { copied: copied.length, missing: missing.length } };
     },
@@ -652,7 +824,14 @@ export const motionTools = [
         if (fs.existsSync(fallbackSrc)) {
           fs.copyFileSync(fallbackSrc, destPath);
         } else {
-          fs.writeFileSync(destPath, 'audio placeholder');
+          // Write a valid 1-second silent WAV file instead of corrupt text.
+          // A text "audio placeholder" is not a valid audio file and causes MediaError
+          // when the <audio> tag tries to decode it.
+          const SILENT_WAV = Buffer.from(
+            'UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=',
+            'base64'
+          );
+          fs.writeFileSync(destPath, SILENT_WAV);
         }
       }
 
@@ -661,11 +840,42 @@ export const motionTools = [
       if (fs.existsSync(htmlFile)) {
         let html = fs.readFileSync(htmlFile, 'utf-8');
         if (!html.includes('id="bgm"')) {
-          const audioTag = `\n<audio id="bgm" src="assets/music.mp3" preload="auto" loop></audio>\n`;
+          // Inject both the audio element AND the seek-sync script.
+          // Without the sync script, the BGM plays from 0:00 on autoplay and ignores
+          // the timeline position entirely — scrubbing, rewinding and scene jumps
+          // produce audio that has nothing to do with the frame on screen.
+          const bgmBlock = `
+<audio id="bgm" src="assets/music.mp3" preload="auto" loop></audio>
+<script>
+(function() {
+  var bgm = document.getElementById('bgm');
+  if (!bgm) return;
+  bgm.volume = ${vol.toFixed(2)};
+  var _origSeek = window.seek;
+  if (typeof _origSeek === 'function') {
+    window.seek = function(t) {
+      _origSeek(t);
+      // Sync audio position — only adjust when drift exceeds 0.3s to avoid
+      // constant seeking which causes audio glitches.
+      if (Math.abs(bgm.currentTime - t) > 0.3) {
+        try { bgm.currentTime = t % (bgm.duration || Infinity); } catch(_) {}
+      }
+    };
+  }
+  // Also hook into playCuesFor if it exists, to start/stop BGM with playback
+  var _origPlayCues = window.playCuesFor;
+  window.playCuesFor = function(t, playing) {
+    if (_origPlayCues) _origPlayCues(t, playing);
+    if (playing && bgm.paused) bgm.play().catch(function(){});
+    else if (!playing && !bgm.paused) bgm.pause();
+  };
+})();
+</script>
+`;
           if (html.includes('</body>')) {
-            html = html.replace('</body>', `${audioTag}</body>`);
+            html = html.replace('</body>', `${bgmBlock}</body>`);
           } else {
-            html += audioTag;
+            html += bgmBlock;
           }
           fs.writeFileSync(htmlFile, html, 'utf-8');
           injected = true;

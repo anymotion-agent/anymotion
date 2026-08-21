@@ -112,6 +112,42 @@ function walk(dir, projectDir, out = [], depth = 0) {
   return out;
 }
 
+/** Validates and heals common syntax errors before writing to disk. */
+function validateAndHealSyntax(filePath, content) {
+  if (typeof content !== 'string') return content;
+  const ext = path.extname(filePath).toLowerCase();
+  let healed = content;
+
+  if (ext === '.json') {
+    try {
+      JSON.parse(healed);
+    } catch (e) {
+      try {
+        const repaired = healed.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+        JSON.parse(repaired);
+        healed = repaired;
+      } catch (_) {
+        throw new Error(`JSON syntax error in ${filePath}: ${e.message}`);
+      }
+    }
+  } else if (ext === '.js') {
+    // Basic balanced brackets check & auto-close for JavaScript
+    let openB = (healed.match(/{/g) || []).length;
+    let closeB = (healed.match(/}/g) || []).length;
+    let openP = (healed.match(/\(/g) || []).length;
+    let closeP = (healed.match(/\)/g) || []).length;
+
+    if (openB > closeB && openB - closeB <= 5) {
+      healed += '\n' + '}'.repeat(openB - closeB);
+    }
+    if (openP > closeP && openP - closeP <= 5) {
+      healed += '\n' + ')'.repeat(openP - closeP);
+    }
+  }
+
+  return healed;
+}
+
 export const fsTools = [
   {
     name: 'read_file',
@@ -300,23 +336,21 @@ export const fsTools = [
       const target = assertWritable(ctx.project.dir, input.path);
       const existed = fs.existsSync(target);
       ensureDir(target);
-      fs.writeFileSync(target, input.content, 'utf-8');
+      const finalContent = validateAndHealSyntax(input.path, input.content);
+      fs.writeFileSync(target, finalContent, 'utf-8');
       // The model composed these bytes, so it already knows them — recording that here means
       // a read_file straight after a write returns "unchanged" instead of echoing back the
       // content the model just sent. That echo was a full duplicate of the write, at input
       // prices, for no new information.
-      remember(target, input.content, { full: true });
+      remember(target, finalContent, { full: true });
       return {
-        content: `${existed ? 'Overwrote' : 'Created'} ${input.path} (${countLines(input.content)} lines).`,
+        content: `${existed ? 'Overwrote' : 'Created'} ${input.path} (${countLines(finalContent)} lines).`,
         meta: {
-          added: countLines(input.content),
+          added: countLines(finalContent),
           removed: 0,
           path: input.path,
           existed,
-          // The head of the file, for the numbered preview under the tool line. A new
-          // file has no diff to show, and "wrote 412 lines" tells the user nothing
-          // about whether the right 412 lines landed.
-          preview: input.content.split('\n').slice(0, 14).join('\n')
+          preview: finalContent.split('\n').slice(0, 14).join('\n')
         }
       };
     },
@@ -331,14 +365,16 @@ export const fsTools = [
     description:
       'Replace an exact string in a file. This is the preferred way to change an existing composition: ' +
       'it keeps everything you are not touching. old_string must match the file byte for byte, including ' +
-      'indentation, and must be unique unless replace_all is true. Read the file before your first edit to it. ' +
+      'indentation. CRITICAL: old_string MUST be completely unique. NEVER use generic lines like `</div>` or ' +
+      '`}` alone. Always include 2-4 lines of context above and below the target to guarantee uniqueness, ' +
+      'otherwise the edit will fail. Read the file before your first edit to it. ' +
       'This returns the lines around the change, so after editing you already have the current state of that ' +
       'region — chain further edits directly instead of re-reading the file.',
     input_schema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Path relative to the project folder.' },
-        old_string: { type: 'string', description: 'Exact text to find. Include surrounding lines to make it unique.' },
+        old_string: { type: 'string', description: 'Exact text to find. MUST include 2-4 surrounding lines to ensure the string is completely unique within the file.' },
         new_string: { type: 'string', description: 'Text to replace it with.' },
         replace_all: { type: 'boolean', description: 'Replace every occurrence instead of requiring a unique match.' }
       },
@@ -364,25 +400,59 @@ export const fsTools = [
       const occurrences = original.split(input.old_string).length - 1;
 
       if (occurrences === 0) {
+        // Auto-heal whitespace-only/indentation differences if unique
+        const normalizeWS = s => s.split('\n').map(l => l.trim()).filter(Boolean).join('\n');
+        const normOriginal = normalizeWS(original);
+        const normOld = normalizeWS(input.old_string);
+        const normOccurrences = normOriginal.split(normOld).length - 1;
+
+        if (normOccurrences === 1) {
+          const origLines = original.split('\n');
+          const targetTrimmed = input.old_string.split('\n').map(l => l.trim()).filter(Boolean);
+          let matchStart = -1;
+          let matchEnd = -1;
+
+          for (let i = 0; i < origLines.length; i++) {
+            if (origLines[i].trim() === targetTrimmed[0]) {
+              let tIdx = 0;
+              let oIdx = i;
+              while (tIdx < targetTrimmed.length && oIdx < origLines.length) {
+                const oTrimmed = origLines[oIdx].trim();
+                if (!oTrimmed) {
+                  oIdx++;
+                  continue; // Skip empty lines in original
+                }
+                if (oTrimmed === targetTrimmed[tIdx]) {
+                  tIdx++;
+                  oIdx++;
+                } else {
+                  break;
+                }
+              }
+              if (tIdx === targetTrimmed.length) {
+                matchStart = i;
+                matchEnd = oIdx;
+                break;
+              }
+            }
+          }
+
+          if (matchStart >= 0) {
+            const matchedRaw = origLines.slice(matchStart, matchEnd).join('\n');
+            input.old_string = matchedRaw;
+            return this.run(input, ctx);
+          }
+        }
+
         // The failure tells the model what to do, but the nearby actual text tells it what
         // string to try instead — so it does not have to read the whole file again, guess,
-        // and fail a second time. A 40-character excerpt around where the match was expected
-        // is cheaper than a 2000-line re-read and more useful than "not found".
+        // and fail a second time.
         const lines = original.split('\n');
         const searchLines = input.old_string.split('\n');
         const firstSearchLine = searchLines[0] || '';
         let bestMatch = '';
         let bestScore = 0;
 
-        // Naive fuzzy: find the line with the longest common prefix with the first line of
-        // old_string. This catches "copied stale indentation" and "forgot a trailing comma".
-        //
-        // Compared trimmed, and only for lines with real content. Scoring the raw lines let
-        // leading whitespace carry the match: in an indented composition every blank or
-        // near-blank line shares the first 8-12 characters with the target, so a random empty
-        // line would outscore the actual near-miss and the hint would point at nothing. The
-        // indentation is also exactly what the model most often got wrong, so it is the least
-        // informative part to match on.
         const needleTrimmed = firstSearchLine.trim();
         if (needleTrimmed) {
           for (const line of lines) {
@@ -394,7 +464,6 @@ export const fsTools = [
               if (candidate[i] === needleTrimmed[i]) score++;
               else break;
             }
-            // A couple of shared characters is coincidence, not a lead.
             if (score > bestScore && score >= 4) { bestScore = score; bestMatch = line; }
           }
         }
@@ -411,7 +480,8 @@ export const fsTools = [
       if (occurrences > 1 && !input.replace_all) {
         throw new Error(
           `old_string appears ${occurrences} times in ${input.path}. ` +
-          `Add surrounding context to make it unique, or set replace_all to true.`
+          `You MUST include 2-4 lines of surrounding context above and below the target to guarantee uniqueness, ` +
+          `or set replace_all to true if you genuinely want to replace every occurrence.`
         );
       }
 
@@ -419,12 +489,13 @@ export const fsTools = [
         ? original.split(input.old_string).join(input.new_string)
         : original.replace(input.old_string, input.new_string);
 
-      fs.writeFileSync(target, updated, 'utf-8');
+      const finalContent = validateAndHealSyntax(input.path, updated);
+      fs.writeFileSync(target, finalContent, 'utf-8');
 
       // Re-stamp the hash, keeping whatever range the model had actually read. See
       // rememberAfterEdit — marking the whole file seen here is the one thing that would
       // let this cache withhold bytes the model has never been shown.
-      rememberAfterEdit(target, updated);
+      rememberAfterEdit(target, finalContent);
 
       const removed = countLines(input.old_string) * (input.replace_all ? occurrences : 1);
       const added = countLines(input.new_string) * (input.replace_all ? occurrences : 1);

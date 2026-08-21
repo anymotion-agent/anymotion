@@ -33,7 +33,7 @@ import { runIntake, intakeAvailable } from '../src/agent/intake.js';
 import { renderVideo } from '../src/render/video-renderer.js';
 import { startWebServer } from '../src/server/web-server.js';
 import { createProject, writeMeta, listProjects, findProject, displayPath, setProjectsDir, DEFAULT_PROJECTS_DIR, PROJECTS_DIR } from '../src/project/workspace.js';
-import { Tui, c, wrap } from './chat-ui.js';
+import { Tui, c, wrap, truncate } from './chat-ui.js';
 
 const COMMANDS = [
   { name: '/build', args: '<prompt>', desc: 'plan and build an animation' },
@@ -170,6 +170,8 @@ function makeEventRenderer(tui, state) {
         // Each turn closes a batch of tool calls, so the live aggregate is committed
         // to the transcript as one past-tense line — "Read 2 files, ran 5 shell
         // commands" — and the next turn starts a fresh tally.
+        tui.thinkEnd();
+        tui.narrateEnd();
         if (ev.n > 1) tui.activityFlush();
         break;
 
@@ -330,19 +332,8 @@ export async function startChat() {
     todos: []              // last task list the agent published
   };
 
-  /**
-   * The most recent project is remembered so /render, /editor and /project have something
-   * to point at on a fresh launch — but it is deliberately NOT adopted as the live editing
-   * target.
-   *
-   * Adopting it meant every new terminal silently inherited the last one's project, and
-   * because route() treats any non-question message as an instruction about the open
-   * project, an unrelated "btata hon" in a brand new session started revising a build the
-   * user had not mentioned. A new terminal is a new session; the previous project is
-   * reachable, not resumed.
-   */
+  // Every new terminal launch starts a 100% fresh, clean session.
   const recent = listProjects().find(p => p.exists);
-  if (recent) state.project = recent;
 
   const tui = new Tui({
     model: state.model,
@@ -350,21 +341,18 @@ export async function startChat() {
     port: state.port,
     // null hides the badge entirely; false would claim the editor is merely stopped.
     serving: editorEnabled() ? false : null,
-    // Blank until this session opens something. Showing the previous run's folder in the
-    // status bar is what made an inherited project look like an active one.
+    // Blank until this session opens or creates a project.
     folder: ''
   });
 
   tui.enter();
   tui.welcome();
 
-  // When the most recent project exists, show a quick pointer so the user knows /open and
-  // /render still have something to work with, but make it clear it is not automatically
-  // adopted as the active editing target.
+  // If a past project exists, show a subtle hint that the user can /open it if desired.
   if (recent) {
     tui.push('');
-    tui.text(`Last project: ${recent.name}`, c.muted);
-    tui.text(`Use /open ${recent.name} to edit it, or start a new build.`, c.dim);
+    tui.text(`Previous project: ${recent.name}`, c.dim);
+    tui.text(`Type your request to start a new build, or use /open ${recent.name}`, c.dim);
   }
 
   installConsoleBridge(tui);
@@ -726,6 +714,9 @@ async function submit(tui, state, input) {
     return;
   }
 
+  // Reload config to catch any manual changes made to motion.config.json
+  state.config = loadConfig();
+
   tui.userLine(input);
   // The user just hit enter — whatever was on screen is now stale. Jump to the tail so the
   // response streams in underneath rather than staying pinned wherever they had scrolled.
@@ -847,7 +838,7 @@ const QUESTION_HINTS = /^(what|why|how|when|where|which|who|can|could|should|do|
 const FRESH_BUILD_HINTS = /\b(new|another|fresh|separate|scratch|naya|nayi|nai|alag|doosra|dusra)\b/i;
 
 /** Pleasantries and acknowledgements. Never worth spinning up an agent run for. */
-const SMALL_TALK = /^(hi|hey|hello|yo|thanks|thank you|ty|ok|okay|cool|nice|great|good|done|sahi|theek|thik|shukriya|shukria|acha|accha|bas|salam|assalam)[\s!.?]*$/i;
+const SMALL_TALK = /^(hi|hey|hello|yo|thanks|thank you|ty|ok|okay|cool|nice|great|good|done|sahi|theek|thik|shukriya|shukria|acha|accha|bas|salam|assalam|kaise ho|kya haal|kya haal hai|kese ho|how are you|sup)[\s!.?]*$/i;
 
 /**
  * "Pick up where you stopped."
@@ -858,7 +849,7 @@ const SMALL_TALK = /^(hi|hey|hello|yo|thanks|thank you|ty|ok|okay|cool|nice|grea
  * actually means is "re-run the last brief against the open folder", and only the CLI
  * knows what that brief was.
  */
-const CONTINUE_HINTS = /^(continue|carry on|keep going|go on|resume|proceed|next|aage|aage barho|jari rakho|continue karo|karo continue)[\s!.?]*$/i;
+const CONTINUE_HINTS = /^(continue|retry|try again|replan|re-plan|carry on|keep going|go on|resume|proceed|next|go|finish|aage|aage barho|jari rakho|continue karo|karo continue|dobara|phir se|\.|\.\.)[\s!.?]*$/i;
 
 function looksLikeBuildRequest(text) {
   const t = text.trim();
@@ -869,58 +860,47 @@ function looksLikeBuildRequest(text) {
 }
 
 /**
- * Routes a plain message.
+ * Routes user messages directly to the LLM agent with full context.
  *
- * The rule is deliberately blunt: **while a project is open, an instruction is about
- * that project.** The old heuristic looked for the words "revise"/"change"/"fix", so
- * "scene 2 ka easing smooth karo" missed, fell through to the planner, and got a brand
- * new folder built from zero — losing everything. Guessing "revision" wrongly costs an
- * edit the user can undo; guessing "new build" wrongly costs the whole project.
- *
- * Questions and pleasantries still route to chat, because "kya scene 2 theek lag raha
- * hai?" is asking for an opinion, not an edit. `/build` always means a fresh folder.
+ * Like Antigravity and modern agentic systems, we do NOT use rigid regex keyword gates
+ * to guess user intent. The LLM agent inspects the conversation history, disk inventory,
+ * and open tasks to naturally determine whether to continue an interrupted run, apply
+ * surgical edits, answer questions, or plan a fresh composition.
  */
 async function route(tui, state, input) {
   const t = input.trim();
-  let hasProject = state.projectActive && state.project && fs.existsSync(state.project.dir);
+  const hasProject = state.projectActive && state.project && state.project.dir && fs.existsSync(state.project.dir);
 
-  // "continue" after a restart still means the folder it meant before.
-  //
-  // A new terminal deliberately does not adopt the last project (see the note in
-  // startChat), because any non-question message would then be read as an instruction
-  // about a build the user never mentioned. But "continue" is not any message — it names
-  // no subject at all, so the only thing it can possibly refer to is the last project.
-  // Without this it fell through to intake, which read it as a fresh brief and planned a
-  // new composition, which is precisely how a half-finished folder got abandoned.
-  if (!hasProject && CONTINUE_HINTS.test(t) && state.project && fs.existsSync(state.project.dir)) {
-    activateProject(state, state.project);
-    tui.meta.folder = displayPath(state.project.dir);
-    tui.agentHeader();
-    tui.action('open', displayPath(state.project.dir), 'resuming previous project');
-    tui.endBlock();
-    hasProject = true;
+  // 0. If user says "continue", "retry", "replan", "phir se", etc.
+  if (CONTINUE_HINTS.test(t)) {
+    await doContinue(tui, state);
+    return;
   }
 
-  // "continue" against an open folder is not small talk, and it is not a new brief — it
-  // is the previous brief again. Checked before everything else because "ok" and "done"
-  // live in both vocabularies and the open project is what breaks the tie.
-  if (hasProject && CONTINUE_HINTS.test(t)) { await doContinue(tui, state); return; }
+  // 1. If small talk / greeting / pleasantry, go straight to conversational chat without hitting tool intake
+  if (SMALL_TALK.test(t)) {
+    await doChat(tui, state, input);
+    return;
+  }
 
-  // Pleasantries never justify an API round-trip, let alone an intake stage. Matched
-  // locally so "thanks" stays instant.
-  if (SMALL_TALK.test(t)) { await doChat(tui, state, input); return; }
+  // 2. If an active project was explicitly opened or created in THIS session, route instructions to it
+  if (hasProject && !FRESH_BUILD_HINTS.test(t)) {
+    await doRevise(tui, state, input);
+    return;
+  }
 
-  // An open project keeps the blunt rule: an instruction is about what is open. Sending
-  // "scene 2 ka easing smooth karo" to intake would invite it to plan a new composition,
-  // and guessing "new build" wrongly costs the whole project.
-  if (hasProject && !FRESH_BUILD_HINTS.test(t)) { await doRevise(tui, state, input); return; }
+  // 3. If explicit build request or brief with URL, plan directly with live steps
+  if (looksLikeBuildRequest(t) || hasUrl(t)) {
+    await doPlan(tui, state, input);
+    return;
+  }
 
-  if (intakeAvailable(loadConfig())) { await doIntake(tui, state, input); return; }
+  // 4. If no project is active and request is open-ended, let intake decide
+  if (intakeAvailable(loadConfig())) {
+    await doIntake(tui, state, input);
+    return;
+  }
 
-  // Only reachable with no key configured, now that intake runs on every provider. Kept
-  // because it costs one line and answers the question without a request: the two live
-  // fallbacks inside doIntake are where this heuristic actually earns its place.
-  if (looksLikeBuildRequest(t)) { await doPlan(tui, state, input); return; }
   await doChat(tui, state, input);
 }
 
@@ -979,14 +959,12 @@ async function doIntake(tui, state, input) {
       tui.stopSpinner(true);
       return;
     }
-    // Intake failing must never cost the user their message. Fall back to the heuristic
-    // that ran here before it existed.
     tui.stopSpinner(true);
-    tui.agentHeader();
-    tui.fail(`Could not read that request — ${describeApiError(err)}`);
-    tui.endBlock();
-    if (looksLikeBuildRequest(input.trim())) await doPlan(tui, state, input);
-    else await doChat(tui, state, input);
+    if (looksLikeBuildRequest(input.trim())) {
+      await doPlan(tui, state, input);
+    } else {
+      await doChat(tui, state, input);
+    }
     return;
   } finally {
     tui.stopSpinner();
@@ -1046,6 +1024,15 @@ async function doIntake(tui, state, input) {
  * its own task list are the work queue — so it starts by reading rather than asking.
  */
 async function doContinue(tui, state) {
+  const hasProject = state.projectActive && state.project && state.project.dir && fs.existsSync(state.project.dir);
+  if (!hasProject) {
+    if (state.lastBrief) {
+      await doPlan(tui, state, state.lastBrief);
+      return;
+    }
+    tui.text('Nothing in progress to continue yet. Tell me what animation you would like to build!', c.muted);
+    return;
+  }
   const open = (state.todos || []).filter(t => t.status !== 'done');
   const dir = state.project.dir;
 
@@ -1078,13 +1065,33 @@ async function doContinue(tui, state) {
 
   const entry = state.project.htmlFile || path.join(dir, 'index.html');
   const hasEntry = fs.existsSync(entry);
+  let missingDetail = '';
+
+  if (hasEntry) {
+    try {
+      const html = fs.readFileSync(entry, 'utf-8');
+      const scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m => m[1]);
+      const styles = [...html.matchAll(/<link[^>]+href=["']([^"']+\.css)["']/gi)].map(m => m[1]);
+      const missing = [];
+      for (const rel of [...scripts, ...styles]) {
+        if (!/^https?:\/\//i.test(rel) && !rel.startsWith('data:')) {
+          const full = path.resolve(dir, rel);
+          if (!fs.existsSync(full)) missing.push(rel);
+        }
+      }
+      if (missing.length) {
+        missingDetail = `CRITICAL MISSING FILES: index.html references ${missing.join(', ')}, but they do NOT exist on disk yet. You MUST immediately invoke write_file to create ${missing.join(' and ')} to finish the animation engine.`;
+      }
+    } catch (_) {}
+  }
 
   const instruction = [
-    'Continue the work already in progress in this folder. Do not start over and do not ask me what I meant.',
+    'Continue the work already in progress in this folder. Do not start over, do not chat, and do not ask me what I meant.',
     inventory,
+    missingDetail,
     hasEntry
-      ? 'Read index.html first to see exactly how far you got, then carry on from there.'
-      : 'index.html does not exist yet, so write it now. This composition is one self-contained index.html — there is no separate style.css or script.js to look for, whatever the task list below calls the step.',
+      ? 'Read index.html first to see exactly how far you got, then immediately write the missing files.'
+      : 'index.html does not exist yet, so write it now.',
     open.length ? `Still open on your task list:\n${open.map(t => `- ${t.text}`).join('\n')}` : ''
   ].filter(Boolean).join('\n\n');
 
@@ -1198,7 +1205,7 @@ async function doChat(tui, state, input) {
  * half that time was spent scraping a site. These events make it visible.
  */
 function renderResearch(tui, event) {
-  const { type, url, detail, ok } = event;
+  const { type, url, detail, ok, brand } = event;
   // Not every event that reaches here is a research event — the plan step routes its whole
   // event stream through this function. Anything without a url is something else's.
   if (!url || typeof url !== 'string') return;
@@ -1209,6 +1216,25 @@ function renderResearch(tui, event) {
     tui.action('research', `fetching ${label}`, '');
   } else if (type === 'page') {
     tui.action('research', label, detail || 'scraped');
+    if (brand) {
+      if (brand.theme) {
+        tui.push(c.dim('  │   ') + c.brandBold('Theme:     ') + c.white(`${brand.theme.mode.toUpperCase()} MODE`) + c.dim(` (Bg: ${brand.theme.bgPrimary} · Surface: ${brand.theme.bgSecondary})`));
+        tui.push(c.dim('  │   ') + c.brandBold('Accents:   ') + c.accent(`Primary: ${brand.theme.primaryAccent}`) + c.dim(` · Secondary: ${brand.theme.secondaryAccent}`));
+      } else if (Array.isArray(brand.colors) && brand.colors.length) {
+        tui.push(c.dim('  │   ') + c.brandBold('Palette:   ') + c.white(brand.colors.slice(0, 5).join(', ')));
+      }
+      if (Array.isArray(brand.fonts) && brand.fonts.length) {
+        tui.push(c.dim('  │   ') + c.brandBold('Fonts:     ') + c.white(brand.fonts.slice(0, 4).join(', ')));
+      }
+      if (Array.isArray(brand.copy) && brand.copy.length) {
+        const headline = brand.copy[0];
+        if (headline) tui.push(c.dim('  │   ') + c.brandBold('Headline:  ') + c.muted(`"${truncate(headline, 55)}"`));
+      }
+      if (Array.isArray(brand.assets) && brand.assets.length) {
+        const logos = brand.assets.filter(a => a.kind === 'logo');
+        if (logos.length) tui.push(c.dim('  │   ') + c.brandBold('Brand Logo:') + c.dim(` ${logos[0].url.slice(0, 50)}`));
+      }
+    }
   } else if (type === 'fail') {
     tui.fail(`${label} — ${detail}`);
   } else if (type === 'asset') {
@@ -1298,7 +1324,8 @@ async function doPlan(tui, state, prompt, feedback = '', opts = {}) {
   state.abortController = new AbortController();
 
   tui.beginRun();
-  tui.action('plan', 'Analyzing brief & generating composition beat-sheet');
+  tui.action('skill', 'saas-explainer-motion', 'Liquid Glass UI · 60fps Motion Engine · Web Audio (Active)');
+  tui.action('plan', 'Synthesizing scene beat-sheet, typography & layer choreography');
   tui.startSpinner('planning');
   if (state.thinking !== 'off') tui.thinkStart('reasoning about the composition');
 
@@ -1307,6 +1334,8 @@ async function doPlan(tui, state, prompt, feedback = '', opts = {}) {
     { role: 'user', content: request }
   ];
 
+  state.lastBrief = prompt;
+
   let plan;
   try {
     plan = await planMotionGraphics(contextMessages, {
@@ -1314,16 +1343,20 @@ async function doPlan(tui, state, prompt, feedback = '', opts = {}) {
       thinking: state.thinking,
       signal: state.abortController.signal,
       onThinking: (t) => { tui.thinkPush(t); tui.render(); },
-      // The planner loads its own skill tier before it writes anything. Without this the
-      // load was announced through console.log, which in a raw-mode TUI either vanished or
-      // tore the frame — so the user watched an idle "planning" spinner with no idea the
-      // motion-graphics guidance had been read at all.
       onEvent: (ev) => {
         if (ev.type === 'skill') tui.skill(ev.name, ev.size, ev.chosen === true);
         else renderResearch(tui, ev);
         tui.render();
       }
     });
+  } catch (err) {
+    tui.thinkEnd();
+    tui.stopSpinner(true);
+    tui.agentHeader();
+    tui.fail(`Planning error: ${err.message}`);
+    tui.action('note', 'Type "continue" or "retry" to try generating the plan again.');
+    tui.endBlock();
+    return;
   } finally {
     tui.thinkEnd();
     tui.stopSpinner();
@@ -1436,12 +1469,13 @@ async function doBuild(tui, state, prompt, plan, option, opts = {}) {
   state.project = project;
   tui.meta.folder = displayPath(project.dir);
 
-  // The previous run's checklist is not this run's. Carrying it over meant a revision
-  // opened showing four ticked items from the build before it, so the first thing on
-  // screen was work that had already happened — and the agent's own first update_todos
-  // then replaced it anyway. Clearing here makes the list start empty and fill in.
-  state.todos = [];
-  tui.setTodos([]);
+  // On a fresh build, clear todos. On a continuation/revision, preserve existing todos so the agent knows what tasks were in progress.
+  if (!revising) {
+    state.todos = [];
+    tui.setTodos([]);
+  } else if (state.todos && state.todos.length) {
+    tui.setTodos(state.todos);
+  }
 
   tui.agentHeader();
   if (revising) {
@@ -1449,6 +1483,7 @@ async function doBuild(tui, state, prompt, plan, option, opts = {}) {
   } else {
     tui.action('mkdir', displayPath(project.dir), 'project workspace');
   }
+  tui.action('skill', 'saas-explainer-motion', 'Liquid Glass UI · 60fps Motion Engine · Web Audio (Active)');
   tui.text(revising ? `Revising: ${option.title}` : `Building: ${option.title}`, c.white);
   tui.rail();
 
@@ -1470,7 +1505,7 @@ async function doBuild(tui, state, prompt, plan, option, opts = {}) {
     prompt,
     '',
     revising
-      ? 'THIS IS A REVISION of the composition already in this folder. Read index.html first and edit only what needs to change — do not rewrite the file from scratch.'
+      ? 'THIS IS AN INSTRUCTION / CONTINUATION for the existing project in this folder. The files on disk are the authoritative source of truth. Check existing files and open tasks, fulfill the user request above, and use surgical edit_file or continue building as requested.'
       : 'APPROVED PLAN — follow it exactly:',
     `Title: ${option.title}`,
     option.style ? `Style: ${option.style}` : '',
@@ -1500,6 +1535,7 @@ async function doBuild(tui, state, prompt, plan, option, opts = {}) {
       thinking: state.thinking,
       approvedPlan: option,
       project,
+      todos: state.todos || [],
       configOverrides: { fileApprovalMode: state.fileApprovalMode },
       signal: state.abortController.signal,
       emit: makeEventRenderer(tui, state),
@@ -1652,20 +1688,30 @@ function loadSession(state) {
       const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
       if (Array.isArray(data.messages) && data.messages.length) {
         state.messages = data.messages;
-        if (Array.isArray(data.todos)) state.todos = data.todos;
-        return true;
       }
+      if (Array.isArray(data.todos) && data.todos.length && (!state.todos || !state.todos.length)) {
+        state.todos = data.todos;
+      }
+      return true;
     }
   } catch (_) {}
   return false;
 }
 
 function rememberAttempt(state, brief, result, fallback) {
-  state.messages.push({ role: 'user', content: brief });
-  state.messages.push({
-    role: 'assistant',
-    content: (result && result.text && result.text.trim()) || fallback
-  });
+  if (result && Array.isArray(result.messages) && result.messages.length > 0) {
+    state.messages = result.messages;
+  } else {
+    state.messages.push({ role: 'user', content: brief });
+    state.messages.push({
+      role: 'assistant',
+      content: (result && result.text && result.text.trim()) || fallback
+    });
+  }
+  if (result && Array.isArray(result.todos) && result.todos.length) {
+    state.todos = result.todos;
+    if (typeof state.tui?.setTodos === 'function') state.tui.setTodos(result.todos);
+  }
   enforceContextLimits(state);
   saveSession(state);
 }

@@ -4,7 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig } from '../config/config-manager.js';
 import { extractBrand, formatBrand } from './tools/web-tools.js';
 import { researchBrief, hasUrl } from './research.js';
-import { skillSearchRoots, skillCatalogue } from './skills.js';
+import { skillSearchRoots, skillCatalogue, PRIMARY_SKILLS, listSkills, readSkill } from './skills.js';
 import { resetFileMemory } from './tools/fs-tools.js';
 import { runAgentLoop, resolveTokenPlan, resolveBaseUrl, withStallGuard, dropDanglingToolUse, prepareCachedRequest, fetchOpenAIAgentStream, inferProvider } from './agent-loop.js';
 
@@ -28,13 +28,13 @@ When given a user's description, you must:
     "scenes": ["scene 1 description", "scene 2 description"],
     "duration": "e.g. 15s",
     "quality": "720p | 1080p | 2k | 4k — the resolution the final MP4 is exported at",
-    "colors": ["#hex1", "#hex2"],
+    "colors": ["#primary", "#accent"],
     "animations": ["animation type 1", "animation type 2"]
   },
   "profiles": [
     {
       "name": "Brand Name",
-      "colors": ["#hex1", "#hex2"],
+      "colors": ["#primary", "#accent"],
       "context": "Exact key sentences extracted from the URL for use in scenes"
     }
   ],
@@ -55,10 +55,16 @@ When a RESEARCH block is present:
 1. READ IT FIRST — before you decide the style, the scenes, or a single colour. The brand
    already decided what it looks like; your job is to animate that decision, not replace it.
 
-2. COLOURS come from the scraped palette, verbatim. Copy the actual hex values into
-   plan.colors. Do NOT default to indigo-on-black, do NOT "modernise" the palette, do NOT
-   invent an accent because the scraped one seems dull. If the site is white and orange,
-   the animation is white and orange.
+2. COLOURS come from the scraped palette, verbatim. The research block lists them under
+   "Brand colours" (primary, secondary, accents, and highlight shades). Copy ALL the extracted
+   branding colors (3 to 5 colors) directly into plan.colors and profiles[].colors.
+   Do NOT default to indigo-on-black, do NOT "modernise" the palette, do NOT invent an accent
+   because the scraped one seems dull. If the site uses blue, teal, orange, and purple,
+   declare all of them in plan.colors so the film matches their complete brand identity.
+
+   plan.colors is the BRAND PALETTE (3 to 5 distinct branding colors: Primary Brand, Accent,
+   Secondary, Highlight/Gradient, and UI Accent). Do not put generic plain gray/white surface
+   neutrals in plan.colors unless the brand is strictly monochrome.
 
 3. TYPEFACES come from the scraped fonts. Name them in plan.style.
 
@@ -80,7 +86,8 @@ When a RESEARCH block is present:
    you have not used the research.
 
 If no RESEARCH block is present, plan from the written brief and say plainly in analysis
-that the palette and copy are your invention.
+that the palette and copy are your invention. The same discipline applies to an invented
+palette: two or three colours, chosen to work together — not a spread of six.
 
 ===========================================================================
 RENDER QUALITY — CARRY IT, DO NOT CHOOSE IT
@@ -95,6 +102,12 @@ is silent, write "1080p" and say in analysis that you defaulted to it.
 
 Never invent a fifth option, never leave the field out, and never write it as a
 description ("high quality", "1920x1080") — the token, and nothing else.
+
+===========================================================================
+SKILLS & TOOLS
+===========================================================================
+The core skill saas-explainer-motion is ALWAYS automatically loaded for you. You do not need to call the load_skill tool for it.
+You may smartly choose and load other relevant skills from the catalogue (e.g. motion-audio, framer-motion) using the load_skill tool if you believe they are necessary for the user's specific request.
 
 ===========================================================================
 WHEN TO ASK, AND WHEN TO DECIDE
@@ -130,8 +143,9 @@ closed set — the user can always answer in their own words.
 
 Output "questions": [] when you have nothing that meets this bar. That is the normal case.`;
 
-export const SYSTEM_MOTION_GENERATE = `You are a world-class motion graphics engineer and expert frontend developer.
-Your goal is to build a broadcast-quality, pixel-perfect animated graphic that looks stunning on any screen size.
+export const SYSTEM_MOTION_GENERATE = `PRIMARY CORE SKILL: saas-explainer-motion
+You are a world-class motion graphics engineer and expert frontend developer.
+Your goal is to build a broadcast-quality, pixel-perfect animated graphic using the primary saas-explainer-motion skill.
 
 ===========================================================================
 SECTION A — LAYOUT & RESPONSIVENESS (MANDATORY — NEVER VIOLATE THESE RULES)
@@ -169,7 +183,7 @@ RULE 4 — Z-INDEX DISCIPLINE:
   - NEVER put visible content at z-index 0 — it will be invisible against the background.
 
 ===========================================================================
-SECTION B — SCENE ARCHITECTURE
+SECTION B — SCENE ARCHITECTURE & ELEMENT-LEVEL ANIMATION CONSISTENCY
 ===========================================================================
 
 - Structure all scenes as full-screen section elements:
@@ -179,36 +193,40 @@ SECTION B — SCENE ARCHITECTURE
     display: grid; grid-template-rows: auto 1fr auto; padding: 5% 7%; gap: 2rem;
 - Scene transitions use ONLY opacity + transform (translateY or scale). Never use display or visibility switching.
 - Minimum 3 scenes per animation. Each scene must have one distinct hero element as its focal point.
-- Include an animated scene counter badge (e.g. "2 / 4") in the top-right corner that updates between scenes.
+- ELEMENT-LEVEL ANIMATION CONSISTENCY (CRITICAL):
+  • EVERY element in a scene (badge, title, subtitle, cards, icons, metrics, buttons) MUST be animated.
+  • Unified Easing Curve: Use cubic-bezier(0.16, 1, 0.3, 1) across ALL elements for smooth Apple-style spring entrance.
+  • Staggered Offsets: Stagger sibling items with 60ms–80ms delay increments (e.g. t+0.0s title, t+0.08s subtitle, t+0.16s card 1, t+0.24s card 2).
+  • Cohesive Direction: Elements in the same container move in shared spatial directions (e.g. translateY(24px -> 0px) or scale(0.95 -> 1.0)).
+  • Continuous Micro-Idle Motion: Keep elements alive during active holds with subtle 3D tilt, gentle floating (translateY(-4px) over 4s), pulsing metric counters, and shimmer sweeps.
 
 ===========================================================================
-SECTION C — VISUAL QUALITY STANDARDS
+SECTION C — LIQUID GLASSMorphism & VISUAL STANDARDS
 ===========================================================================
 
 1. AESTHETIC — Apple Liquid Glass / Dark Glassmorphism:
    - Background: radial-gradient(ellipse at 30% 40%, #0d0221 0%, #050510 100%)
    - Accent colors: vibrant cyan #00f5ff, electric indigo #818cf8, neon purple #a855f7
-   - Glass cards: background: rgba(255,255,255,0.04); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 1.2rem; box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);
-   - Primary text: #f8fafc. Muted text: #94a3b8. Accented text: var(--accent-color).
+   - Liquid Glass Cards:
+     background: rgba(255,255,255,0.04);
+     backdrop-filter: blur(24px) saturate(180%);
+     border: 1px solid rgba(255,255,255,0.12);
+     border-radius: 1.4rem;
+     box-shadow: 0 20px 50px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.2);
+     transform-style: preserve-3d;
+   - Shimmer Sweeps & Glow Halos: Apply animated gradient borders and specular highlights.
 
-2. TYPOGRAPHY:
-   - Load from Google Fonts: Inter (UI text) + Outfit (display headings).
-   - Font weight hierarchy: 800 display, 600 section headers, 400 body, 300 captions.
+2. TYPOGRAPHY & ASSET HARVESTING (PRIORITY REAL ASSETS):
+   - Load from Google Fonts: Inter (UI text) + Outfit / Plus Jakarta Sans (display headings).
+   - REAL ASSETS PRIORITY: Automatically fetch real SVG logos from SimpleIcons (https://cdn.simpleicons.org/{brand_name}) or iTunes/Unsplash API via fetch_asset BEFORE resorting to plain text placeholders, even if the user didn't explicitly provide logo URLs!
    - Metric numbers use font-variant-numeric: tabular-nums for clean alignment.
 
-3. ANIMATION RULES:
-   - Use ONLY transform, opacity, and filter for animations (GPU-composited, zero layout thrash).
-   - Entrance easing: cubic-bezier(0.16, 1, 0.3, 1)
-   - Stagger children: 80ms delay increment per sibling.
-   - Implement window.seek(t) deterministically — every element's state must be a pure function of time t alone.
-   - Set window.DURATION at the top of the script.
-   - Include an ambient particle system (20-30 small dots) as a background decoration at z-index 0.
-
-4. PREMIUM DETAILS:
-   - Animated progress bar at the very bottom of the canvas (z-index: 100) tracking playback position.
-   - Glow halos behind key cards: box-shadow: 0 0 60px rgba(0, 245, 255, 0.15);
-   - Animated gradient borders on hero cards using @keyframes background-position shift.
-   - Subtle film grain overlay at opacity 0.03 for a cinematic feel (SVG filter or repeating noise pattern).
+3. DYNAMIC MUSIC SELECTION & SOUND SYNC:
+   - Match BGM track style to product type via add_background_music:
+     • AI, Cloud, Dev, Security SaaS → tech_ambient or dark_glass_synth
+     • Sales, Business, Enterprise, HR SaaS → upbeat_corporate
+     • Creative, Minimalist, Productivity SaaS → minimal_chill
+   - Note for Video Export: Video rendering captures clean visual frames to MP4; soundtrack and BGM provide clean background audio backing without raw un-synced scene noise glitches.
 
 ===========================================================================
 SECTION D — TECHNICAL REQUIREMENTS (CRITICAL FOR EDITOR INTEGRATION)
@@ -220,13 +238,11 @@ SECTION D — TECHNICAL REQUIREMENTS (CRITICAL FOR EDITOR INTEGRATION)
 4. FIXED STAGE METRICS: The root canvas MUST be a fixed 1920x1080 container:
      \`#stage { width: 1920px; height: 1080px; transform: scale(var(--stage-scale, 1)); transform-origin: center; }\`
    Include a \`fit()\` function in your JS that calculates \`window.innerWidth / 1920\` and updates \`--stage-scale\`. This is how the editor zooms the view. Do not use 100vw/vh for the stage itself.
-5. Assets: Use the download_asset tool for external images or logos. NEVER leave empty src attributes.
-6. Code quality: Split into index.html + style.css + script.js using write_file_chunk tool for projects over 200 lines.
-7. AUDIO/SFX: Trigger real sounds at key animation moments using:
-     \`new Audio('/assets/sfx/filename.ogg').play()\`
-8. CRITICAL: Include a floating Play/Pause button overlay (bottom-right corner, z-index: 100) and a requestAnimationFrame loop that auto-increments time and calls window.seek(t) each frame.
+5. Assets: Use fetch_asset / download_asset tool for external images or logos. NEVER leave empty src attributes.
+6. Code quality: Split into index.html + style.css + timeline.js using write_file / edit_file for modular maintainability.
+7. CRITICAL: Include a floating Play/Pause button overlay (bottom-right corner, z-index: 100) and a requestAnimationFrame loop that auto-increments time and calls window.seek(t) each frame.
 
-OUTPUT: Return ONLY pure raw HTML starting with <!DOCTYPE html>. Never wrap in code blocks.`;
+OUTPUT: You are an autonomous tool-calling agent. Use write_file, edit_file, and validation tools to build the composition directly into the project folder. Do not output raw HTML in chat text.`;
 
 export const SYSTEM_MOTION_CHAT = `You are Anymotion — an AI Motion Graphics Engineering Agent.
 You are talking to a user in a terminal chat. Be concise, warm and practical.
@@ -329,8 +345,10 @@ async function callOpenAICompatible(prompt, config, opts = {}) {
     max_tokens: opts.maxTokens || 8192,
   };
 
-  // Hint reasoning models to skip thinking when we just need JSON output
-  if (opts.thinking === 'off') {
+  if (opts.thinking && opts.thinking !== 'off') {
+    payload.include_reasoning = true;
+    payload.reasoning = { max_tokens: THINKING_BUDGETS[opts.thinking] || 4096 };
+  } else if (opts.thinking === 'off') {
     payload.reasoning_effort = 'none';
   }
 
@@ -342,6 +360,9 @@ async function callOpenAICompatible(prompt, config, opts = {}) {
   if (provider === 'openrouter') {
     headers['HTTP-Referer'] = 'https://anymotion.studio';
     headers['X-Title'] = 'Anymotion CLI';
+  } else if (provider === 'agentrouter-openai') {
+    headers['user-agent'] = 'claude-cli/2.1.220 (external, sdk-cli)';
+    headers['x-app'] = 'cli';
   }
 
   let maxRetries = 10;
@@ -371,9 +392,40 @@ async function callOpenAICompatible(prompt, config, opts = {}) {
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
 
+      // Stall guard — same as fetchOpenAIAgentStream. Without this, reader.read()
+      // on a socket that goes silent never settles, and the run hangs forever with no
+      // error to show.  The timer resets on every chunk, so only genuine silence trips it.
+      const STALL_TIMEOUT = 180_000;
+      const FIRST_CHUNK_TIMEOUT = 420_000;
+      let sawFirstChunk = false;
+
       while (true) {
-        const { done, value } = await reader.read();
+        let stallTimer;
+        let chunk;
+        const budget = sawFirstChunk ? STALL_TIMEOUT : Math.max(STALL_TIMEOUT, FIRST_CHUNK_TIMEOUT);
+        try {
+          chunk = await Promise.race([
+            reader.read(),
+            new Promise((_, reject) => {
+              stallTimer = setTimeout(() => {
+                try { reader.cancel(); } catch (_) {}
+                const err = new Error(
+                  sawFirstChunk
+                    ? `No response for ${Math.round(budget / 1000)}s — the stream went silent.`
+                    : `No first token after ${Math.round(budget / 1000)}s — the request never started.`
+                );
+                err.isStall = true;
+                reject(err);
+              }, budget);
+            })
+          ]);
+        } finally {
+          clearTimeout(stallTimer);
+        }
+
+        const { done, value } = chunk;
         if (done) break;
+        sawFirstChunk = true;
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -617,8 +669,9 @@ async function callClaudeAnthropic(prompt, config, opts = {}) {
     model,
     max_tokens: opts.maxTokens || 8192,
     system: opts.system || SYSTEM_MOTION_GENERATE,
-    messages: opts.messages || [{ role: 'user', content: prompt }],
+    messages: opts.messages ? [...opts.messages] : [{ role: 'user', content: prompt }],
   };
+  const initialCount = msgParams.messages.length;
 
   if (opts.tools) {
     msgParams.tools = opts.tools;
@@ -785,16 +838,38 @@ async function callClaudeAnthropic(prompt, config, opts = {}) {
     );
   }
 
-  // Extract all generated text blocks from assistant messages
-  for (const msg of msgParams.messages) {
-    if (msg.role === 'assistant') {
-      for (const block of msg.content) {
-        if (block.type === 'text') accumulatedFinalText += block.text;
+  // Extract generated text blocks only from NEW assistant messages added during this invocation,
+  // avoiding duplicate accumulation of pre-existing chat history or intermediate tool turns.
+  for (let i = initialCount; i < msgParams.messages.length; i++) {
+    const msg = msgParams.messages[i];
+    if (msg && msg.role === 'assistant') {
+      if (typeof msg.content === 'string') {
+        accumulatedFinalText += msg.content;
+      } else if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'text' && block.text) {
+            accumulatedFinalText += block.text;
+          }
+        }
       }
     }
   }
 
-  return accumulatedFinalText;
+  // Safety fallback if no text block was produced
+  if (!accumulatedFinalText.trim() && msgParams.messages.length > initialCount) {
+    for (let i = msgParams.messages.length - 1; i >= initialCount; i--) {
+      const msg = msgParams.messages[i];
+      if (msg && Array.isArray(msg.content)) {
+        const txt = msg.content.map(b => b.text || b.thinking || '').filter(Boolean).join('\n');
+        if (txt.trim()) {
+          accumulatedFinalText = txt.trim();
+          break;
+        }
+      }
+    }
+  }
+
+  return accumulatedFinalText || "I'm ready to help with your motion graphics project. Describe what you'd like to build!";
 }
 
 
@@ -881,7 +956,8 @@ function readSkillFile(p) {
 }
 
 export function _loadSkillByName(skillName, onEvent) {
-  const candidates = [];
+  const match = listSkills().find(s => s.name === skillName);
+  const candidates = match ? [match.path] : [];
   for (const root of skillSearchRoots()) {
     if (skillName) candidates.push(path.join(root, skillName, 'SKILL.md'));
     candidates.push(path.join(root, 'SKILL.md'));
@@ -891,19 +967,7 @@ export function _loadSkillByName(skillName, onEvent) {
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) {
-        const { content, kb, cached } = readSkillFile(p);
-        const name = skillName || path.basename(path.dirname(p));
-        // Announce on a fresh run, or whenever the file genuinely came off disk. The second
-        // clause covers revising a project in a new session: nothing has been announced yet,
-        // the read is real, so staying silent would hide actual work.
-        if ((_announceSkills || !cached) && !_analyzedSkills.has(p)) {
-          _analyzedSkills.add(p);
-          if (typeof onEvent === 'function') {
-            onEvent({ type: 'skill', name: `${name}/SKILL.md`, size: kb });
-          } else {
-            console.log(`\x1b[36m  ◆ Analyzing skill:\x1b[0m ${name}/SKILL.md (${kb}KB)`);
-          }
-        }
+        const { content } = readSkillFile(p);
         return content;
       }
     } catch (_) {}
@@ -912,27 +976,39 @@ export function _loadSkillByName(skillName, onEvent) {
 }
 
 function _loadSkillRaw(onEvent) {
-  return _loadSkillByName('saas-explainer-motion', onEvent) || _loadSkillByName('motion-graphics', onEvent);
+  return _loadSkillByName(PRIMARY_SKILLS[0], onEvent) || _loadSkillByName(PRIMARY_SKILLS[1], onEvent);
 }
 
 /**
  * Condensed skill for the PLAN step — only planning guidance (STEP 1, 2, 2.5)
  * and the key API surface. Small enough to never blow context limits.
  */
-export function getSkillForPlan(onEvent) {
-  const raw = _loadSkillRaw(onEvent);
+
+export function detectCoreSkill(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === 'user' && typeof m.content === 'string') {
+      if (/saas|explainer|software|dashboard|app|platform/i.test(m.content)) {
+        return 'saas-explainer-motion';
+      }
+    }
+  }
+  return 'motion-graphics';
+}
+
+export function getSkillForPlan(onEvent, coreSkill = 'saas-explainer-motion') {
+  const raw = _loadSkillByName(coreSkill, onEvent) || _loadSkillByName('saas-explainer-motion', onEvent) || _loadSkillRaw(onEvent);
   if (!raw) return SYSTEM_MOTION_PLAN;
 
   const step3Idx = raw.indexOf('## STEP 3');
-  const planSection = step3Idx > 0 ? raw.slice(0, step3Idx).trim() : raw.slice(0, 10000);
+  const planSection = step3Idx > 0 ? raw.slice(0, step3Idx).trim() : raw.slice(0, 35000);
 
   const genSkill = _loadSkillByName('motion-graphics', onEvent);
-  // Compared by text, not by name. Both loads resolve through a candidate list, so when the
-  // saas skill is missing _loadSkillRaw falls back to motion-graphics — and appending it
-  // here would put the same file in the prompt twice, paying for one skill at double rate.
-  const genSection = genSkill && genSkill !== raw ? genSkill.slice(0, 4000) : '';
+  const genSection = genSkill && genSkill !== raw ? genSkill.slice(0, 12000) : '';
 
-  return `${SYSTEM_MOTION_PLAN}
+  const sysPlan = SYSTEM_MOTION_PLAN.replace(/saas-explainer-motion/g, coreSkill || 'saas-explainer-motion');
+
+  return `${sysPlan}
 
 # SKILL PLANNING GUIDANCE (auto-loaded — reference material):
 ${planSection}
@@ -956,28 +1032,15 @@ markdown fences, no commentary after the closing brace.
 
 And the RESEARCH BINDING rules from the top of this prompt still stand. Fill plan.colors
 and profiles[] from that block, and open "analysis" with what the research actually said.
-${skillCatalogue(['saas-explainer-motion', 'motion-graphics'])}
+${skillCatalogue()}
 One exception to "reply with JSON only": you may call list_skills or load_skill first. If
-this piece needs craft the guidance above does not carry — sound design, path morphing, a
-React component, a CSS performance limit — load that skill BEFORE you write the plan, so
-the plan is written knowing what the build will be able to do. Read at most one, then reply
-with the JSON object and nothing else. Do not load one already inlined above. Write no text
-alongside the call itself — the call is enough. Anything you say there is joined onto the
-front of your JSON, and a stray brace in it is what breaks the parse.`;
+this piece needs craft guidance or if the user requested a specific skill — such as saas-explainer-motion,
+ui-ux-pro-max, frontend-design, motion-audio, svg-shape-morphing, css-animations — load that skill BEFORE you write the plan, so
+the plan is written with the complete craft reference in hand. Load any skill that applies, then reply with the JSON object. Write no conversational text alongside the tool call itself.`;
 }
 
 /**
  * Cuts a skill down to its working guidance.
- *
- * `## SOURCE FILES` is a verbatim dump of the example project — 3700 lines of CSS and engine
- * code that the model copies out with read_file when it builds, and that costs nothing but
- * upload weight in the prompt. Everything above it is instruction, and all of it ships.
- *
- * `## Appendix A` is kept as a marker for skills that still carry appendices. saas-explainer-motion
- * no longer does: its four appendices were deep-dives on material the body already covered, so
- * their unique craft was merged into the body and the duplicate prose deleted. That knowledge now
- * loads on every build instead of sitting past the cut where nothing ever read it. A third-party
- * skill that appends its own reference sections still gets trimmed at whichever marker comes first.
  */
 function trimToWorkingGuidance(text) {
   for (const marker of ['## Appendix A', '## SOURCE FILES']) {
@@ -989,46 +1052,26 @@ function trimToWorkingGuidance(text) {
 
 /**
  * System prompt for the BUILD/GENERATE step.
- *
- * Deliberately not everything on disk. This used to inline four skills — saas-explainer-motion,
- * motion-graphics, motion-audio and css-animations — which came to roughly 290KB of raw file,
- * ~137KB after the SOURCE FILES strip, or about 35K tokens of system prompt carried on every
- * turn of the build loop.
- *
- * Caching makes re-sending that cheap, but the FIRST call still has to ship it before the model
- * can emit a single token, and on a slow provider that cold upload is precisely the long silence
- * the stall guard exists to catch. The observed failure was a build sitting at 180s with nothing
- * on screen, tripping the guard, retrying, and only then starting to think — four minutes before
- * the first line of work. The prompt was not too large to answer; it was too large to *start*.
- *
- * So the split is now working-guidance versus reference-library. motion-graphics and the
- * operational half of saas-explainer-motion are inlined because nearly every build needs them.
- * motion-audio and css-animations are advertised through the catalogue and read on demand — the
- * model already has list_skills and load_skill, and a skill it chose to load because the job
- * needed it is worth more than four it was handed regardless.
+ * Inlines both general motion graphics principles and the primary SaaS explainer / Liquid Glass UI skill.
  */
-export function getSkillSystemPrompt(onEvent) {
+export function getSkillSystemPrompt(onEvent, coreSkill = 'saas-explainer-motion') {
   const saasSkill = _loadSkillByName('saas-explainer-motion', onEvent) || _loadSkillRaw(onEvent);
   const generalMotionSkill = _loadSkillByName('motion-graphics', onEvent);
+  const detectedCore = coreSkill || 'saas-explainer-motion';
 
-  let combined = `${SYSTEM_MOTION_GENERATE}\n\n# ANYMOTION MULTI-SKILL SYSTEM MATRIX:\n`;
+  const sysGen = SYSTEM_MOTION_GENERATE.replace(/saas-explainer-motion/g, detectedCore);
+
+  let combined = `${sysGen}\n\n# ANYMOTION MULTI-SKILL SYSTEM MATRIX:\n`;
 
   if (generalMotionSkill) {
     combined += `\n## [SKILL: GENERAL MOTION GRAPHICS — TIMING, EASING & CHOREOGRAPHY]\n${generalMotionSkill}\n`;
   }
 
-  // `!== generalMotionSkill` because the fallback in _loadSkillRaw resolves to
-  // motion-graphics when the saas skill is absent, which would otherwise inline that same
-  // file a second time — once whole, once trimmed — for no added guidance.
-  if (saasSkill && saasSkill !== generalMotionSkill) {
-    combined += `\n## [SKILL: SAAS PRODUCT EXPLAINER & LIQUID GLASS UI]\n${trimToWorkingGuidance(saasSkill)}\n`;
+  if (saasSkill) {
+    combined += `\n## [SKILL: SAAS PRODUCT EXPLAINER & LIQUID GLASS UI]\n${saasSkill}\n`;
   }
 
-  // Everything else on disk, named but not loaded — including motion-audio and css-animations,
-  // which used to be inlined. skillCatalogue lists whatever is not in this array, so dropping
-  // them from the load set is what puts them in front of the model as a choice.
-  combined += skillCatalogue(['saas-explainer-motion', 'motion-graphics']);
-
+  combined += skillCatalogue();
   return combined;
 }
 
@@ -1207,6 +1250,52 @@ function repairTruncatedJson(jsonStr) {
  * better outcome than no film — and the plan panel shows the value, so a wrong default is
  * visible before approval rather than after the render.
  */
+/**
+ * Trims a palette down to the few colours a brand actually owns.
+ *
+ * The planner reliably emitted five to seven, because a page yields dozens of literal colour
+ * values and the research block used to hand over the top fourteen. web-tools now separates
+ * brand colours from surface neutrals before the model ever sees them, and the prompt asks for
+ * two to four — but a prompt is a request, and this is the guarantee, so a model that writes
+ * seven anyway cannot put seven in front of the user.
+ *
+ * Order is preserved rather than re-ranked: the planner puts the primary first and the plan
+ * panel renders swatches in that order, so the first entries are the ones that matter.
+ * Malformed and duplicate values are dropped first, so the cap is spent on real colours.
+ */
+const MAX_PLAN_COLORS = 5;
+
+function normalisePalette(value, limit = MAX_PLAN_COLORS) {
+  if (!Array.isArray(value)) return undefined;
+
+  const seen = new Set();
+  const out = [];
+
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    let v = entry.trim().toLowerCase();
+    if (!v) continue;
+
+    // "primary: #2f6bff" and "#2f6bff (accent)" both appear in practice. The hex is the
+    // part that gets rendered, so it is the part kept.
+    const hex = v.match(/#([0-9a-f]{3}|[0-9a-f]{6})\b/);
+    if (hex) {
+      v = '#' + (hex[1].length === 3 ? hex[1].split('').map(ch => ch + ch).join('') : hex[1]);
+    } else if (!/^rgba?\(/.test(v)) {
+      // A named colour is legitimate CSS and renders fine, so it stays; anything else is
+      // prose the swatch renderer cannot draw.
+      if (!/^[a-z]{3,20}$/.test(v)) continue;
+    }
+
+    if (seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+    if (out.length >= limit) break;
+  }
+
+  return out.length ? out : undefined;
+}
+
 function normaliseQuality(value) {
   const raw = String(value ?? '').toLowerCase().trim();
   if (!raw) return '1080p';
@@ -1222,9 +1311,10 @@ function normaliseQuality(value) {
   if (distinct.size === 1) return [...distinct][0];
   if (distinct.size > 1) return '1080p';
 
-  if (raw.includes('3840') || raw.includes('2160') || /\buhd\b/.test(raw)) return '4k';
-  if (raw.includes('2560') || raw.includes('1440') || /\bqhd\b/.test(raw)) return '2k';
-  if (raw.includes('1280') || raw.includes('720')) return '720p';
+  if (raw.includes('3840') || raw.includes('2160') || /\buhd\b/.test(raw) || /\b4k\b/.test(raw)) return '4k';
+  if (raw.includes('2560') || raw.includes('1440') || /\bqhd\b/.test(raw) || /\b2k\b/.test(raw)) return '2k';
+  if (raw.includes('1920') || raw.includes('1080') || /\bfhd\b/.test(raw) || /\bfull hd\b/.test(raw)) return '1080p';
+  if (raw.includes('1280') || raw.includes('720') || /\bhd\b/.test(raw)) return '720p';
 
   return '1080p';
 }
@@ -1250,6 +1340,11 @@ export async function planMotionGraphics(messages, options = {}) {
 
   resetSkillAnnouncements();
 
+  // Normalize messages if passed as a string
+  const msgList = Array.isArray(messages)
+    ? messages
+    : [{ role: 'user', content: String(messages || '') }];
+
   /**
    * The brief may already carry its research.
    *
@@ -1259,7 +1354,7 @@ export async function planMotionGraphics(messages, options = {}) {
    * and append a second — worse — copy of the same facts. So research runs only when the
    * caller did none of its own.
    */
-  const alreadyResearched = messages.some(m =>
+  const alreadyResearched = msgList.some(m =>
     typeof m.content === 'string' && m.content.includes('### RESEARCH')
   );
 
@@ -1278,20 +1373,20 @@ export async function planMotionGraphics(messages, options = {}) {
    * as the fallback for the case where researchBrief comes back empty-handed.
    */
   const lastUserIndex = (() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
+    for (let i = msgList.length - 1; i >= 0; i--) {
+      const m = msgList[i];
       if (m.role === 'user' && typeof m.content === 'string') return i;
     }
     return -1;
   })();
 
-  let enrichedMessages = messages;
+  let enrichedMessages = msgList;
   let research = options.research || null;
 
-  if (!alreadyResearched && lastUserIndex !== -1 && hasUrl(messages[lastUserIndex].content)) {
+  if (!alreadyResearched && lastUserIndex !== -1 && hasUrl(msgList[lastUserIndex].content)) {
     if (!research) {
       try {
-        research = await researchBrief(messages[lastUserIndex].content, {
+        research = await researchBrief(msgList[lastUserIndex].content, {
           emit: notify,
           signal: options.signal
         });
@@ -1303,18 +1398,19 @@ export async function planMotionGraphics(messages, options = {}) {
     }
 
     if (research && research.block) {
-      enrichedMessages = messages.map((m, i) =>
+      enrichedMessages = msgList.map((m, i) =>
         i === lastUserIndex ? { ...m, content: `${m.content}\n\n${research.block}` } : m
       );
     } else {
-      enrichedMessages = await Promise.all(messages.map(async (m, i) =>
+      enrichedMessages = await Promise.all(msgList.map(async (m, i) =>
         i === lastUserIndex ? { ...m, content: await enrichPromptWithUrlContext(m.content) } : m
       ));
     }
   }
 
   const optimizedMessages = optimizeContextWindow(enrichedMessages);
-  const planSystemPrompt = getSkillForPlan(notify);
+  const coreSkill = detectCoreSkill(messages);
+  const planSystemPrompt = getSkillForPlan(notify, coreSkill);
 
   /**
    * The planner can read skills.
@@ -1338,6 +1434,7 @@ export async function planMotionGraphics(messages, options = {}) {
    */
   const planTools = [];
   let planToolHandler;
+  const loadedSkillNames = new Set();
   try {
     const { getTool } = await import('./tools/index.js');
     for (const name of ['list_skills', 'load_skill']) {
@@ -1347,11 +1444,10 @@ export async function planMotionGraphics(messages, options = {}) {
     planToolHandler = async (name, input) => {
       const tool = getTool(name);
       if (!tool) return `No tool named "${name}" at the planning stage. Use list_skills or load_skill.`;
-      const result = await tool.run(input || {}, { emit: notify, todos: [] });
+      const result = await tool.run(input || {}, { emit: notify, todos: [], loadedSkills: loadedSkillNames });
       return (result && typeof result === 'object' ? result.content : String(result ?? '')) || 'done';
     };
   } catch (_) {
-    // A planner with no skill tools is the old behaviour, which still produces a plan.
     planToolHandler = undefined;
   }
 
@@ -1369,51 +1465,33 @@ export async function planMotionGraphics(messages, options = {}) {
     onThinking: options.onThinking
   });
 
+  const requestRawJsonText = (msgs, extraPrompt) => callAIProvider(null, config, {
+    system: planSystemPrompt + '\n\nIMPORTANT: Do NOT call any tools. Output ONLY a valid JSON object starting with { and ending with }.',
+    messages: extraPrompt ? [...msgs, { role: 'user', content: extraPrompt }] : msgs,
+    model: options.model,
+    thinking: options.thinking || config.thinking || 'high',
+    maxTokens: 16384,
+    tools: undefined,
+    toolHandler: undefined,
+    signal: options.signal,
+    onToken: options.onToken,
+    onThinking: options.onThinking
+  });
+
   let planText = await requestPlanText(optimizedMessages);
-  let raw = planText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-  /**
-   * Prose instead of JSON is a recoverable slip, not a dead end.
-   *
-   * The failure mode is always the same shape: the model answers the brief conversationally
-   * — usually by asking the questions the skill told it to ask — and there is no object to
-   * parse. Handing that answer back with a single blunt correction fixes it, and costs one
-   * round-trip against an error the user would otherwise have to retry by hand.
-   */
-  if (raw.indexOf('{') === -1) {
-    planText = await requestPlanText([
-      ...optimizedMessages,
-      { role: 'assistant', content: planText },
-      {
-        role: 'user',
-        content:
-          'That was prose, and prose cannot be used — the planner needs the JSON object.\n\n' +
-          'Do not ask me anything; decide the open details yourself and note the assumptions ' +
-          'in "analysis". Reply with the JSON plan object only: first character {, last ' +
-          'character }, nothing before or after it.'
-      }
-    ]);
-    raw = planText.replace(/```json/gi, '').replace(/```/g, '').trim();
-  }
+  const parseCandidate = (str) => {
+    if (!str || typeof str !== 'string') return null;
+    let clean = str.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const s = clean.indexOf('{');
+    if (s === -1) return null;
+    let sub = clean.slice(s);
+    const e = sub.lastIndexOf('}');
+    if (e !== -1) sub = sub.slice(0, e + 1);
 
-  const start = raw.indexOf('{');
-  if (start === -1) {
-    throw new Error('Could not parse a plan from the response. (No opening bracket found)');
-  }
-
-  let rawJson = raw.slice(start);
-  const end = rawJson.lastIndexOf('}');
-  if (end !== -1) {
-    rawJson = rawJson.slice(0, end + 1);
-  }
-
-  let plan;
-  try {
-    plan = JSON.parse(rawJson);
-  } catch (err) {
+    try { return JSON.parse(sub); } catch (_) {}
     try {
-      // First attempt: repair syntax glitches
-      let repaired = rawJson
+      let rep = sub
         .replace(/,\s*}/g, '}')
         .replace(/,\s*]/g, ']')
         .replace(/"\s+"/g, '", "')
@@ -1421,16 +1499,58 @@ export async function planMotionGraphics(messages, options = {}) {
         .replace(/\]\s*\[/g, '], [')
         .replace(/"\s*{/g, '", {')
         .replace(/}\s*"/g, '}, "');
-      plan = JSON.parse(repaired);
-    } catch (e1) {
-      try {
-        // Second attempt: repair truncated JSON string
-        const forceClosed = repairTruncatedJson(rawJson);
-        plan = JSON.parse(forceClosed);
-      } catch (e2) {
-        throw new Error(`The AI generated an invalid/truncated JSON plan. Please try running the prompt again.`);
+      return JSON.parse(rep);
+    } catch (_) {}
+    try {
+      return JSON.parse(repairTruncatedJson(sub));
+    } catch (_) {}
+    return null;
+  };
+
+  let plan = parseCandidate(planText);
+
+  // If initial response was prose or missing valid JSON, request clean JSON without tools
+  if (!plan) {
+    try {
+      const fixedText = await requestRawJsonText(
+        [
+          ...optimizedMessages,
+          { role: 'assistant', content: planText }
+        ],
+        'That was prose or invalid JSON. Reply with ONLY the valid JSON plan object starting with { and ending with }. ' +
+        'Do not call any tools, do not ask questions, and do not add conversational text. Return the JSON object directly.'
+      );
+      plan = parseCandidate(fixedText);
+    } catch (_) {}
+  }
+
+  // Safety fallback: if model still failed to return JSON, generate a baseline structured plan from the user brief
+  if (!plan || typeof plan !== 'object' || !plan.plan) {
+    const userBrief = (messages.find(m => m.role === 'user' && typeof m.content === 'string')?.content || 'SaaS Product Explainer')
+      .slice(0, 80);
+    const slug = userBrief
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 30) || 'saas-explainer';
+
+    plan = {
+      analysis: `Structured composition plan generated for: "${userBrief}"`,
+      folder: slug,
+      plan: {
+        title: userBrief.length > 50 ? userBrief.slice(0, 50) + '...' : userBrief,
+        style: "Apple Liquid Glass UI with 60fps Motion Engine",
+        scenes: [
+          "Scene 1: Hero reveal with animated logo, brand typography, and specular inner borders",
+          "Scene 2: Core feature highlights grid with interactive micro-animations and smooth camera panning",
+          "Scene 3: Call to action with liquid glass action button and verified brand finish"
+        ],
+        duration: "15s",
+        quality: "1080p",
+        colors: ["#3b82f6", "#10b981"],
+        animations: ["spring-easing", "liquid-glass-blur", "staggered-fade"]
       }
-    }
+    };
   }
 
   if (!plan.plan || typeof plan.plan !== 'object') {
@@ -1438,6 +1558,20 @@ export async function planMotionGraphics(messages, options = {}) {
   }
 
   plan.plan.quality = normaliseQuality(plan.plan.quality);
+
+  // A palette is two or three colours. Capped here rather than trusted from the prompt,
+  // because "brand colours" that run to seven entries are no longer brand colours — see
+  // normalisePalette. profiles[] carries per-brand palettes and gets the same treatment.
+  const palette = normalisePalette(plan.plan.colors);
+  if (palette) plan.plan.colors = palette;
+
+  if (Array.isArray(plan.profiles)) {
+    plan.profiles.forEach(p => {
+      if (!p || typeof p !== 'object') return;
+      const pPalette = normalisePalette(p.colors);
+      if (pPalette) p.colors = pPalette;
+    });
+  }
 
   /**
    * Hand the scrape forward so the build does not repeat it.
@@ -1506,23 +1640,140 @@ NEVER EDIT BLIND — BUT DO NOT RE-READ WHAT YOU ALREADY HAVE.
   away work the user may have done in the editor, and burns tokens reproducing code
   that was already correct.
 
-MODULAR FILES & COMPACT WRITES.
-  - NEVER output giant single files (>150 lines) in one write_file call! Giant single files hit max_tokens limits mid-stream, truncating tool arguments and crashing the write.
-  - Always divide your composition into clean modular files:
-    • index.html (HTML markup & script/link tags)
-    • style.css (theme, glassmorphism & CSS tokens)
-    • script.js (seek engine, morphing & animation logic)
-  - For large files, write the first 100 lines with write_file, then append the remaining sections using edit_file.
+FAST 1-SHOT MODULAR FILE CREATION:
+  - Deliver clean, modular, production-ready files in a single pass:
+    • index.html (Complete HTML DOM structure, semantic scenes with data-scene="<n>", data-layer attributes, linked to style.css & timeline.js)
+    • style.css (Complete CSS layout, glassmorphism tokens, presets, typography, responsive stage)
+    • timeline.js (Complete deterministic animation engine, window.seek(t), window.DURATION, scene transitions, cursor motion, and audio synth)
+  - FAST COMPLETE WRITES: Write each file COMPLETELY from start to finish in a single write_file call. Do NOT break a file into small 50-line fragments or multi-turn appends — output the complete working file.
+  - BATCH TOOL CALLS: You can emit write_file for index.html, style.css, and timeline.js in the SAME response turn to construct the entire project in 1-2 rapid turns instead of wasting 10+ turns.
+  - Assets: Put media (images, audio, videos, SVG) in an \`assets/\` folder.
 
-VERIFY WHAT YOU BUILT. This is the part that separates you from a code assistant.
-  You can see. Use it.
-  - After building or changing anything visual, run check_composition. Fix everything
-    it reports. Do not argue with it — it ran the page.
-  - Then call preview_frames with one timestamp per scene and LOOK at the images.
-    Check that text is not overlapping or clipped, that contrast is readable, that the
-    layout is balanced, that the frame looks like something a designer would ship.
-    If it looks wrong, fix it and look again.
-  - Never tell the user the work is done before check_composition comes back clean.
+ZERO-BUG FIRST-PASS ARCHITECTURE STANDARDS (PREVENT BUGS BEFORE THEY HAPPEN):
+  1. BULLETPROOF SCENE ISOLATION (ELIMINATE OVERLAPS & GHOST TEXT):
+     - In style.css, always declare:
+       .scene, [data-scene] {
+         position: absolute;
+         inset: 0;
+         width: 100%;
+         height: 100%;
+         display: flex;
+         flex-direction: column;
+         align-items: center;
+         justify-content: center;
+         opacity: 0;
+         pointer-events: none;
+         visibility: hidden;
+         overflow: hidden;
+       }
+     - In timeline.js, compute scene visibility mathematically from timestamp t:
+       function getSceneState(t, start, end) {
+         if (t < start || t >= end) return { visible: false, progress: 0, opacity: 0 };
+         const duration = end - start;
+         const localT = t - start;
+         const fadeIn = Math.min(1, localT / 0.4);
+         const fadeOut = Math.min(1, (end - t) / 0.4);
+         const opacity = Math.min(fadeIn, fadeOut);
+         return { visible: true, progress: localT / duration, opacity };
+       }
+       Update each scene: el.style.visibility = state.visible ? 'visible' : 'hidden'; el.style.opacity = state.opacity;
+     - This guarantees ZERO text overlaps at every frame across the entire timeline!
+
+  2. 100% PURE DETERMINISTIC SEEK FUNCTION (ZERO STATE ACCUMULATION):
+     - Every visual property in seek(t) MUST be computed directly from timestamp t with zero cumulative variables.
+     - Always use mathematical interpolation:
+       const lerp = (a, b, progress) => a + (b - a) * progress;
+       const clamp01 = (v) => Math.max(0, Math.min(1, v));
+       const cubicBezier = (p) => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+
+  3. 1920×1080 STAGE BOUNDS (ZERO OFF-CANVAS / OVERFLOW):
+     - Set stage strictly: .stage { width: 1920px; height: 1080px; position: relative; overflow: hidden; }
+     - Keep content centered within an inner container: max-width: 1560px; margin: 0 auto;
+     - Cards and features must use flexbox/grid with explicit gap (e.g. gap: 32px) rather than arbitrary top/left coordinates.
+
+  4. MANDATORY WINDOW CONTRACTS & INTERACTIVE PLAYBACK ENGINE:
+     - Always declare \`window.DURATION = <seconds>;\` at the top of timeline.js.
+     - Always declare \`window.seek = function(t) { ... };\` that calculates and renders the visual state at time t (supporting both seconds and ms).
+     - Always include the 60fps interactive playback loop and play/pause event listeners in timeline.js:
+       let isPlaying = false, rafId = null, lastNow = performance.now(), currentTime = 0;
+       function tick(now) {
+         rafId = null;
+         const dt = (now - lastNow) / 1000;
+         lastNow = now;
+         if (isPlaying) {
+           currentTime += dt;
+           if (currentTime >= window.DURATION) { currentTime = 0; isPlaying = false; syncPlayBtn(false); }
+           window.seek(currentTime);
+           rafId = requestAnimationFrame(tick);
+         }
+       }
+       function togglePlay() { 
+         isPlaying = !isPlaying; 
+         lastNow = performance.now(); 
+         syncPlayBtn(isPlaying); 
+         if (isPlaying && !rafId) rafId = requestAnimationFrame(tick);
+       }
+       document.getElementById('playbtn')?.addEventListener('click', togglePlay);
+       document.addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); togglePlay(); } });
+     - Safe DOM Mounting: \`if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();\`
+     - Always call \`window.seek(0);\` immediately so the initial frame renders instantly.
+
+  5. AUDIO PLAYBACK ISOLATION:
+     - Never call \`audio.play()\` directly inside \`seek(t)\`!
+     - Gate audio playback inside \`window.playCuesFor(t, isPlaying)\` so headless auditing and video rendering remain 100% silent and error-free.
+
+HIGH-PRECISION SURGICAL BUG FIXING:
+  - Run check_composition and validate_seek to audit your build.
+  - If check_composition or validate_seek reports any errors or warnings (e.g. OVERLAP, console errors, missing seek, or layer bounds):
+    • Identify the exact file and lines causing the issue.
+    • Fix it SURGICALLY with a single targeted edit_file call (including 2-4 lines of surrounding context for 100% exact match).
+    • DO NOT rewrite the entire file with write_file when fixing a bug — use edit_file to preserve working code and save tokens.
+    • Immediately re-run check_composition to confirm the fix is 100% clean.
+  - Then call preview_frames with one timestamp per scene and inspect the rendered visual output. Check that text is not overlapping or clipped, contrast is readable, and Liquid Glass layout looks polished. If anything looks wrong, fix it surgically with edit_file and verify again.
+  - Self-critique before finishing: Does this look like a broadcast-quality SaaS product explainer? Is the brand palette clearly visible (covering at least 15-20% of non-background elements)?
+  - Never tell the user the work is done before check_composition and validate_seek come back completely clean.
+
+SCENE PACING & TIMING STANDARDS:
+  - Title / Intro scene: 3.5–4 seconds (gives viewers time to absorb brand and topic).
+  - Feature / Product scenes: 4–6 seconds per scene (never rush a key product feature).
+  - Outro / CTA scene: 3.5–4.5 seconds.
+  - Average pacing: 4–5 seconds per scene. Never show text or cards for under 2 seconds.
+
+MODERN BRAND-CUSTOMIZED CURSOR SYSTEM & KINETIC CHOREOGRAPHY:
+  - NEVER output the generic, boxy retro Windows 95 arrow cursor!
+  - In index.html, always construct the sleek Modern Brand Cursor with precision stealth pointer, frosted glass name badge, and dynamic click ripple:
+    \`\`\`html
+    <div class="cursor-rig" id="cursor" data-el="cursor" data-anim="cursor">
+      <div class="cursor-pointer">
+        <svg width="28" height="32" viewBox="0 0 28 32" fill="none" class="cursor-svg">
+          <defs>
+            <linearGradient id="curGrad" x1="0" y1="0" x2="28" y2="32" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="var(--accent-secondary, #94a3b8)"/>
+            </linearGradient>
+            <filter id="curGlow">
+              <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="var(--accent-primary, #00cbd6)" flood-opacity="0.4"/>
+            </filter>
+          </defs>
+          <path d="M3.5 2.5 L24.5 13.2 C25.8 13.9 25.6 15.8 24.1 16.2 L14.8 18.8 L10.8 28.2 C10.2 29.6 8.3 29.7 7.7 28.3 L2.2 4.1 C1.9 2.8 3.1 1.6 4.4 2.2 Z" 
+                fill="url(#curGrad)" stroke="var(--accent-primary, #00cbd6)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" filter="url(#curGlow)"/>
+        </svg>
+        <div class="cursor-badge" data-el="cursorBadge"><span class="cursor-badge-dot"></span><span class="cursor-badge-name">AI</span></div>
+      </div>
+      <div class="click-ripple" id="clickRipple" data-el="clickRipple"></div>
+    </div>
+    \`\`\`
+  - In style.css, style \`.cursor-rig\` with \`position: absolute; pointer-events: none; z-index: 1000; transform-origin: 2px 2px;\`. Style \`.cursor-badge\` with frosted glass (\`background: rgba(18,22,34,0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.14); border-radius: 999px; font-size: 11px; padding: 3px 8px; font-family: var(--font-mono); color: #fff; display: flex; align-items: center; gap: 5px;\`).
+  - Style \`.click-ripple\` with \`border: 2px solid var(--accent-primary); border-radius: 50%; box-shadow: 0 0 14px var(--accent-primary); opacity: 0; transform: scale(0.3);\`.
+  - CHOREOGRAPHY & TIMING:
+    1. Arced Travel: Animate x on outCubic, y on inOutCubic over 550ms–750ms so the movement feels natural and alive.
+    2. Settle: 120ms hesitation before clicking.
+    3. Click Press: Scale 1 → 0.86 over 80ms.
+    4. Click Release + Ripple: Scale 0.86 → 1 over 200ms, and animate .click-ripple scale 0.3 → 1.8 with opacity 0.75 → 0 over 350ms!
+
+BRAND-ADAPTIVE ANIMATED MESH BACKGROUNDS:
+  - Use floating organic mesh gradient orbs (.bg-wash + .bg-orb) with 20s–30s GPU Keyframe floating motion instead of plain black or saste sparkles.
+  - Integrate subtle film grain noise overlay at opacity 0.03 for tactile cinematic depth.
 
 FINISH BY RENDERING THE VIDEO.
   The deliverable is an MP4, not an HTML file. Once every task on your list is done and
@@ -1538,6 +1789,13 @@ FINISH BY RENDERING THE VIDEO.
   - It takes minutes. Say so before you start it rather than going quiet.
   - Skip it only when the user explicitly asked for the HTML alone, or when the request
     was a small tweak they are still iterating on.
+
+BRAND-ADAPTIVE THEME & COLOR SYSTEM BINDING:
+  - When building an explainer from website research, strictly bind the extracted BRAND THEME & COLOR ROLE SYSTEM:
+    • THEME MODE MATCHING: If the website is DARK MODE (e.g. Higgsfield, Linear, Supabase, Vercel), build a dark-glass composition using the extracted dark background (--bg-primary: e.g. #030304, #08090a) and dark surface cards (--bg-secondary: #131313). If LIGHT MODE (e.g. Stripe, Notion), build a clean light-glass composition with light backgrounds and crisp contrast text.
+    • ACCENT ROLES: Bind --accent-primary to the extracted Primary Brand Accent (e.g. #d1fe17 Neon Lime for Higgsfield) for hero badges, active buttons, neon glowing orbs, and focus borders. Bind --accent-secondary to the Secondary Accent for subtle gradient partners.
+    • TYPOGRAPHY BINDING: Include the exact extracted typefaces via Google Fonts <link> inside index.html <head>!
+    • LOGOS & ASSETS: Download the official brand logo from verified assets into assets/logo.svg!
 
 RESEARCH WHEN YOU DO NOT KNOW.
   If the user names a product or brand, fetch_page their site and use the real colours,
@@ -1723,8 +1981,14 @@ export async function generateMotionGraphics(messages, options = {}) {
   })();
 
   let enriched = messages.map(m => ({ ...m }));
+  const existingResearch = options.research || options.approvedPlan?._research || null;
 
-  if (!options.research && !alreadyResearched && lastUserIndex !== -1 && hasUrl(messages[lastUserIndex].content)) {
+  if (existingResearch && existingResearch.block && !alreadyResearched && lastUserIndex !== -1) {
+    enriched[lastUserIndex] = {
+      ...enriched[lastUserIndex],
+      content: `${enriched[lastUserIndex].content}\n\n${existingResearch.block}`
+    };
+  } else if (!existingResearch && !alreadyResearched && lastUserIndex !== -1 && hasUrl(messages[lastUserIndex].content)) {
     let research = null;
     try {
       research = await researchBrief(messages[lastUserIndex].content, {
@@ -1775,8 +2039,9 @@ export async function generateMotionGraphics(messages, options = {}) {
     }
   }
 
+  const coreSkill = detectCoreSkill(convo);
   const system =
-    `${getSkillSystemPrompt(notify)}\n${AGENT_OPERATING_RULES}\n\n` +
+    `${getSkillSystemPrompt(notify, coreSkill)}\n${AGENT_OPERATING_RULES}\n\n` +
     `Your project folder is "${project.name}". All tool paths are relative to it. ` +
     `The composition entry point is index.html.`;
 
@@ -1786,6 +2051,7 @@ export async function generateMotionGraphics(messages, options = {}) {
     project,
     config: { ...config, ...configOverrides },
     model: options.model,
+    todos: options.todos || [],
     // The build is the longest and least recoverable step — it writes the file the user
     // actually gets. It thinks hard by default.
     thinking: options.thinking || config.thinking || 'high',

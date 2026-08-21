@@ -38,9 +38,9 @@ import {
  * `off: 0` is listed explicitly so an intentional "no thinking" survives the lookup as a
  * real value instead of falling through a default and being handed a budget back.
  */
-const THINKING_BUDGETS = { off: 0, low: 1024, medium: 2048, high: 4096, xhigh: 8192, max: 16384 };
+const THINKING_BUDGETS = { off: 0, low: 1024, medium: 1536, high: 2048, xhigh: 4096, max: 8192 };
 
-const MAX_TURNS = 50;
+const MAX_TURNS = 150;
 const MAX_RETRIES = 6;
 const CONTEXT_CHAR_BUDGET = 320_000;
 
@@ -120,23 +120,8 @@ export function resolveTokenPlan(model, requestedBudget, desiredMax = 32_000) {
  * first delta, so this has to be long enough not to kill a slow-but-live request; the
  * point is to catch a stall, not to police latency.
  */
-const STALL_MS = 180_000;
-
-/**
- * Grace for the FIRST event only.
- *
- * These are two different waits wearing the same name. Silence after the stream has started
- * means something broke — a dropped socket, a provider that gave up mid-generation — and three
- * minutes is already generous for that. But silence BEFORE the first event is just the request
- * being uploaded, queued and prefilled, and its length scales with the system prompt: a large
- * skill set on a cold cache can legitimately take minutes to produce token one.
- *
- * Charging both to the same 180s budget is what made a slow first call look like a dead stream.
- * It would trip the guard, retry, and only then start thinking — so the user watched four
- * minutes of nothing before any work appeared, and the retry only "fixed" it because the first
- * attempt had warmed the cache on its way to being killed.
- */
-const FIRST_EVENT_MS = 420_000;
+const STALL_MS = 110_000;
+const FIRST_EVENT_MS = 110_000;
 
 /**
  * Consumes an async iterable, failing if it goes quiet for too long.
@@ -261,13 +246,16 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
       }
     } else if (m.role === 'assistant') {
       if (typeof m.content === 'string') {
-        openaiMessages.push({ role: 'assistant', content: m.content });
+        const cleanContent = m.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        openaiMessages.push({ role: 'assistant', content: cleanContent });
       } else if (Array.isArray(m.content)) {
         let textContent = '';
         const toolCalls = [];
         for (const b of m.content) {
-          if (b.type === 'text') textContent += (b.text || '');
-          else if (b.type === 'tool_use') {
+          if (b.type === 'text') {
+            const cleanText = (b.text || '').replace(/<think>[\s\S]*?<\/think>/gi, '');
+            textContent += cleanText;
+          } else if (b.type === 'tool_use') {
             toolCalls.push({
               id: b.id,
               type: 'function',
@@ -278,7 +266,8 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
             });
           }
         }
-        const msgObj = { role: 'assistant', content: textContent || null };
+        textContent = textContent.trim();
+        const msgObj = { role: 'assistant', content: textContent || (toolCalls.length ? null : '') };
         if (toolCalls.length > 0) msgObj.tool_calls = toolCalls;
         openaiMessages.push(msgObj);
       }
@@ -302,6 +291,11 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
     max_tokens: params.max_tokens || 8192
   };
 
+  if (params.thinking) {
+    payload.include_reasoning = true;
+    payload.reasoning = { max_tokens: params.thinking.budget_tokens || 4096 };
+  }
+
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`
@@ -309,6 +303,9 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
   if (provider === 'openrouter') {
     headers['HTTP-Referer'] = 'https://anymotion.studio';
     headers['X-Title'] = 'Anymotion CLI';
+  } else if (provider === 'agentrouter-openai') {
+    headers['user-agent'] = 'claude-cli/2.1.220 (external, sdk-cli)';
+    headers['x-app'] = 'cli';
   }
 
   const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -330,6 +327,10 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
   let accumulatedText = '';
   let toolCallsMap = {};
   let finishReason = null;
+  // Monotonic counter for fallback tool-call IDs. Date.now() can collide when two
+  // calls arrive in the same millisecond, producing duplicate tool_use_ids that
+  // break the tool_result pairing on the next turn.
+  let _callIdSeq = 0;
 
   /**
    * Handles one `data: {...}` SSE line. Extracted so the leftover buffer can be run
@@ -350,8 +351,9 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
       const delta = choice.delta;
       if (!delta) return;
 
-      if (delta.reasoning_content) {
-        emit({ type: 'thinking', text: delta.reasoning_content });
+      const reasoning = delta.reasoning_content || delta.reasoning || delta.thinking || delta.thought;
+      if (reasoning) {
+        emit({ type: 'thinking', text: reasoning });
       }
 
       if (delta.content) {
@@ -363,7 +365,7 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
         for (const tc of delta.tool_calls) {
           const idx = tc.index ?? 0;
           if (!toolCallsMap[idx]) {
-            toolCallsMap[idx] = { id: tc.id || `call_${Date.now()}_${idx}`, name: tc.function?.name || '', args: '' };
+            toolCallsMap[idx] = { id: tc.id || `call_${++_callIdSeq}_${idx}`, name: tc.function?.name || '', args: '' };
           }
           if (tc.function?.name) toolCallsMap[idx].name = tc.function.name;
           if (tc.function?.arguments) toolCallsMap[idx].args += tc.function.arguments;
@@ -542,6 +544,123 @@ function pruneStaleImages(msgs) {
 }
 
 /**
+ * Compacts verbatim file payloads in historical assistant tool_use calls.
+ *
+ * When an agent writes or edits files (e.g. write_file with 500 lines), once that turn is
+ * answered and settled (older than the immediate active exchange), the verbatim code in the
+ * request history is redundant because the file already exists on disk as the source of truth.
+ *
+ * Compacting historical payloads to lightweight receipts saves 20,000-50,000 tokens per run
+ * while preserving exact tool_use IDs, parameter schemas, and tool_use <-> tool_result pairing.
+ */
+function compactHistoricalToolInputs(msgs) {
+  if (!Array.isArray(msgs) || msgs.length <= 4) return msgs;
+  const cutoff = msgs.length - 4;
+
+  return msgs.map((m, idx) => {
+    if (idx >= cutoff || !Array.isArray(m.content)) return m;
+
+    let modified = false;
+
+    if (m.role === 'assistant') {
+      const newContent = m.content.map(b => {
+        if (b.type === 'tool_use' && b.input && typeof b.input === 'object') {
+          if (b.name === 'write_file' && typeof b.input.content === 'string' && b.input.content.length > 300) {
+            modified = true;
+            const lines = b.input.content.split('\n').length;
+            return {
+              ...b,
+              input: {
+                path: b.input.path,
+                content: `[Verbatim content of ${lines} lines written to disk. Disk file is source of truth.]`
+              }
+            };
+          }
+          if (b.name === 'edit_file' && typeof b.input.replacement === 'string' && b.input.replacement.length > 300) {
+            modified = true;
+            return {
+              ...b,
+              input: {
+                path: b.input.path,
+                target: b.input.target?.slice(0, 100) + '...',
+                replacement: `[Replacement applied to disk (${b.input.replacement.length} chars). Disk file is source of truth.]`
+              }
+            };
+          }
+        }
+        return b;
+      });
+      return modified ? { ...m, content: newContent } : m;
+    }
+
+    if (m.role === 'user') {
+      const newContent = m.content.map(b => {
+        if (b.type === 'tool_result') {
+          if (Array.isArray(b.content)) {
+            let nestedModified = false;
+            const compactedInner = b.content.map(inner => {
+              // Never truncate skill instructions loaded into context
+              if (inner.type === 'text' && typeof inner.text === 'string' && inner.text.includes('# SKILL:')) {
+                return inner;
+              }
+              if (inner.type === 'text' && typeof inner.text === 'string' && inner.text.length > 3000) {
+                nestedModified = true;
+                return {
+                  ...inner,
+                  text: `[Output truncated for older turn. Original was ${inner.text.length} chars.]\n` + inner.text.slice(0, 1500) + '\n...\n' + inner.text.slice(-800)
+                };
+              }
+              return inner;
+            });
+            if (nestedModified) {
+              modified = true;
+              return { ...b, content: compactedInner };
+            }
+          } else if (typeof b.content === 'string') {
+            if (!b.content.includes('# SKILL:') && b.content.length > 3000) {
+              modified = true;
+              return {
+                ...b,
+                content: `[Output truncated for older turn. Original was ${b.content.length} chars.]\n` + b.content.slice(0, 1500) + '\n...\n' + b.content.slice(-800)
+              };
+            }
+          }
+        }
+        return b;
+      });
+      return modified ? { ...m, content: newContent } : m;
+    }
+
+    return m;
+  });
+}
+
+/**
+ * Extracts a concise summary of touched files and key decisions from turns about to be dropped.
+ */
+function summarizeDroppedTurns(droppedMsgs) {
+  const filesTouched = new Set();
+  const milestones = [];
+
+  for (const m of droppedMsgs) {
+    if (Array.isArray(m.content)) {
+      for (const b of m.content) {
+        if (b.type === 'tool_use' && b.input?.path) {
+          filesTouched.add(b.input.path);
+        }
+        if (b.type === 'text' && b.text && b.text.length > 30 && b.text.length < 300) {
+          milestones.push(b.text.trim());
+        }
+      }
+    }
+  }
+
+  const filesStr = filesTouched.size ? Array.from(filesTouched).join(', ') : 'None';
+  const lastMilestone = milestones.length ? milestones[milestones.length - 1] : 'Active implementation';
+  return `Files modified: ${filesStr} | Milestone: ${lastMilestone}`;
+}
+
+/**
  * Drops old turns when the transcript gets long.
  *
  * The subtlety that breaks naive compaction: every tool_use block MUST be answered by a
@@ -549,16 +668,25 @@ function pruneStaleImages(msgs) {
  * looks like a model failure but is really a bookkeeping bug. So we only ever cut at a
  * boundary where no tool call is left dangling, and we drop whole assistant+result pairs.
  */
-function compact(messages, emit) {
+function getContextBudget(model) {
+  const m = String(model || '').toLowerCase();
+  if (m.includes('opus') || m.includes('sonnet') || m.includes('gpt-4') || m.includes('gemini')) return 500_000;
+  return 320_000;
+}
+
+function compact(messages, emit, model) {
+  const charBudget = getContextBudget(model);
   let total = messages.reduce((n, m) => n + messageChars(m), 0);
-  if (total <= CONTEXT_CHAR_BUDGET) return messages;
+  if (total <= charBudget) return messages;
 
   const keep = [...messages];
   const firstUser = keep.length ? [keep.shift()] : [];   // the original request stays
+  const droppedList = [];
   let dropped = 0;
 
-  while (keep.length > 4 && total > CONTEXT_CHAR_BUDGET) {
+  while (keep.length > 4 && total > charBudget) {
     const removed = keep.shift();
+    droppedList.push(removed);
     total -= messageChars(removed);
     dropped++;
 
@@ -568,7 +696,9 @@ function compact(messages, emit) {
       removed.content.some(p => p.type === 'tool_use');
     if (madeToolCalls && keep.length && Array.isArray(keep[0].content) &&
         keep[0].content.some(p => p.type === 'tool_result')) {
-      total -= messageChars(keep.shift());
+      const toolRes = keep.shift();
+      droppedList.push(toolRes);
+      total -= messageChars(toolRes);
       dropped++;
     }
   }
@@ -576,18 +706,24 @@ function compact(messages, emit) {
   // A user message carrying tool_results can never lead the conversation.
   while (keep.length && Array.isArray(keep[0].content) &&
          keep[0].content.some(p => p.type === 'tool_result')) {
-    total -= messageChars(keep.shift());
+    const orphanRes = keep.shift();
+    droppedList.push(orphanRes);
+    total -= messageChars(orphanRes);
     dropped++;
   }
 
   if (emit) emit({ type: 'notice', text: `compacted context — dropped ${dropped} older turns` });
 
-  return [
+  const memorySummary = summarizeDroppedTurns(droppedList);
+
+  const compacted = [
     ...firstUser,
-    { role: 'assistant', content: 'Understood. Continuing from the recent context.' },
-    { role: 'user', content: `[${dropped} earlier turns were trimmed to stay inside the context window. The files on disk are the source of truth — read them if you need detail you no longer remember.]` },
+    { role: 'assistant', content: 'Understood. Continuing with project implementation.' },
+    { role: 'user', content: `[${dropped} earlier turns were trimmed to stay within context budget.\n<session_memory>\n${memorySummary}\nAll files on disk are the source of truth — use read_file if you need specific details.\n</session_memory>]` },
     ...keep
   ];
+
+  return dropDanglingToolUse(compacted);
 }
 
 /**
@@ -829,15 +965,38 @@ function isTransient(err) {
  */
 
 export function inferProvider(config = {}) {
+  const k = String(config.apiKey || '').trim();
+  if (k.startsWith('sk-or-v1-')) return 'openrouter';
+  if (k.startsWith('sk-ant-')) return 'anthropic';
+  if (k.startsWith('gsk_')) return 'groq';
+  if (k.startsWith('sk-proj-') || k.startsWith('sk-admin-')) return 'openai';
+  if (k.startsWith('xai-')) return 'xai';
+  if (k.startsWith('fw_')) return 'fireworks';
+  if (k.startsWith('pplx-')) return 'perplexity';
+
   let url = (config.apiEndpoint || '').trim().toLowerCase();
   if (url.includes('openrouter.ai')) return 'openrouter';
-  if (url.includes('opencode.ai')) return 'opencode';
+  if (url.includes('opencode.ai/zen/go')) return 'opencode-go';
+  if (url.includes('opencode.ai')) return 'opencode-zen';
   if (url.includes('groq.com')) return 'groq';
   if (url.includes('deepseek.com')) return 'deepseek';
   if (url.includes('together.xyz')) return 'together';
   if (url.includes('openai.com')) return 'openai';
+  if (url.includes('generativelanguage.googleapis.com')) return 'gemini';
+  if (url.includes('x.ai')) return 'xai';
+  if (url.includes('mistral.ai')) return 'mistral';
+  if (url.includes('fireworks.ai')) return 'fireworks';
+  if (url.includes('perplexity.ai')) return 'perplexity';
+  if (url.includes('cerebras.ai')) return 'cerebras';
+  if (url.includes('sambanova.ai')) return 'sambanova';
+  if (url.includes('siliconflow.cn') || url.includes('siliconflow.com')) return 'siliconflow';
+  if (url.includes('11434')) return 'ollama';
+  if (url.includes('1234')) return 'lmstudio';
   if (url.includes('tokenrouter.com')) return 'tokenrouter';
+  if (url.includes('kie.ai')) return 'kie';
+  if (url.includes('piapi.ai')) return 'piapi';
   if (url.includes('anthropic.com')) return 'anthropic';
+  if (url.includes('agentrouter.org/v1')) return 'agentrouter-openai';
   if (url.includes('agentrouter.org')) return 'agentrouter';
   if (config.provider) {
     const p = String(config.provider).trim().toLowerCase();
@@ -855,16 +1014,32 @@ export function resolveBaseUrl(config = {}) {
     opencode:       'https://opencode.ai/zen/v1',
     'opencode-zen': 'https://opencode.ai/zen/v1',
     'opencode-go':  'https://opencode.ai/zen/go/v1',
+    tokenrouter:    'https://api.tokenrouter.com/v1',
+    openai:         'https://api.openai.com/v1',
     groq:           'https://api.groq.com/openai/v1',
     deepseek:       'https://api.deepseek.com/v1',
+    gemini:         'https://generativelanguage.googleapis.com/v1beta/openai',
+    xai:            'https://api.x.ai/v1',
+    kie:            'https://api.kie.ai/v1',
+    piapi:          'https://api.piapi.ai/v1',
     together:       'https://api.together.xyz/v1',
-    openai:         'https://api.openai.com/v1',
-    tokenrouter:    'https://api.tokenrouter.com/v1',
+    mistral:        'https://api.mistral.ai/v1',
+    fireworks:      'https://api.fireworks.ai/inference/v1',
+    perplexity:     'https://api.perplexity.ai',
+    cerebras:       'https://api.cerebras.ai/v1',
+    sambanova:      'https://api.sambanova.ai/v1',
+    siliconflow:    'https://api.siliconflow.cn/v1',
+    ollama:         'http://localhost:11434/v1',
+    lmstudio:       'http://localhost:1234/v1',
+    'agentrouter-openai': 'https://agentrouter.org/v1',
     agentrouter:    'https://agentrouter.org',
     anthropic:      'https://api.anthropic.com'
   };
 
-  if (!baseUrl) {
+  const keyPrefix = String(config.apiKey || '').trim();
+  const isKeyProvider = keyPrefix.startsWith('sk-or-v1-') || keyPrefix.startsWith('sk-ant-') || keyPrefix.startsWith('gsk_') || keyPrefix.startsWith('sk-proj-') || keyPrefix.startsWith('xai-') || keyPrefix.startsWith('fw_') || keyPrefix.startsWith('pplx-');
+
+  if (!baseUrl || isKeyProvider || (baseUrl.includes('agentrouter.org') && provider !== 'agentrouter')) {
     return KNOWN[provider] || 'https://agentrouter.org';
   }
 
@@ -963,6 +1138,9 @@ export function describeApiError(err, config = {}) {
   if (status) return `HTTP ${status} from ${endpoint} — ${raw.slice(0, 200)}`;
 
   if (/abort/i.test(raw)) return 'Request aborted.';
+  if (/terminated|UND_ERR_BODY_TERMINATED/i.test(raw)) {
+    return `Connection closed by proxy (120s gateway timeout) — extended thinking exceeded proxy time limit.`;
+  }
   if (/fetch failed/i.test(raw)) {
     return `Network request to ${endpoint} failed — no response at all. Check your connection, VPN, or firewall.`;
   }
@@ -1002,7 +1180,13 @@ export async function runAgentLoop(o) {
   // `off` is a real choice and must survive the lookup, so this cannot use `||` — that
   // turned an explicit 0 back into a budget. Anything unrecognised thinks at 'high'
   // rather than silently dropping to the cheapest setting.
-  const budget = THINKING_BUDGETS[o.thinking] ?? THINKING_BUDGETS.high;
+  const rawBudget = THINKING_BUDGETS[o.thinking] ?? THINKING_BUDGETS.high;
+
+  // AgentRouter uses AWS Bedrock/Vertex backend which emits encrypted thinking signatures (signature_delta).
+  // Cap the budget to 2048 so reasoning finishes fast (15-25s) without exceeding the proxy's 120s gateway limit.
+  const provider = inferProvider(config);
+  const budget = (provider === 'agentrouter' && rawBudget > 2048) ? 2048 : rawBudget;
+
   const tools = toolSchemas();
 
   // Set once, by the self-heal below, when the endpoint proves it will not accept
@@ -1017,7 +1201,7 @@ export async function runAgentLoop(o) {
     config,
     signal,
     emit,
-    todos: [],
+    todos: Array.isArray(o.todos) && o.todos.length ? [...o.todos] : [],
     // Passed straight through to the ask_user tool. Left undefined when the caller has no
     // UI, which the tool checks for rather than blocking on a promise nobody will resolve.
     askUser,
@@ -1044,16 +1228,32 @@ export async function runAgentLoop(o) {
       ? `\n\n# CURRENT ACTIVE TODO LIST:\n` + ctx.todos.map(t => `- [${t.status.toUpperCase()}] ${t.text}`).join('\n') + `\n\nIMPORTANT: Carry out the active task now. Call the required file or command tools immediately. Do not stop until all tasks are marked DONE.`
       : '';
 
+    let projectStatePrompt = '';
+    if (project?.dir && fs.existsSync(project.dir)) {
+      try {
+        const files = fs.readdirSync(project.dir).filter(f => !f.startsWith('.') && f !== 'node_modules' && f !== 'exports');
+        const fileStats = files.map(f => {
+          try {
+            const sz = fs.statSync(path.join(project.dir, f)).size;
+            return `${f} (${Math.round(sz / 1024 * 10) / 10}KB)`;
+          } catch (_) { return f; }
+        });
+        if (fileStats.length) {
+          projectStatePrompt = `\n\n# PROJECT DISK STATE (${path.basename(project.dir)}):\nExisting files: ${fileStats.join(', ')}\nDisk files are always the authoritative source of truth.`;
+        }
+      } catch (_) {}
+    }
+
     const effectiveSystem = typeof system === 'string' 
-      ? system + activeTodosPrompt 
-      : (Array.isArray(system) ? [...system, { type: 'text', text: activeTodosPrompt }] : system);
+      ? system + activeTodosPrompt + projectStatePrompt
+      : (Array.isArray(system) ? [...system, { type: 'text', text: activeTodosPrompt + projectStatePrompt }] : system);
 
     const params = {
       model,
       max_tokens: plan.maxTokens,
       system: cacheableSystem(effectiveSystem),
       messages: cacheHistory(
-        pruneStaleImages(dropDanglingToolUse(compact(messages, emit)))
+        pruneStaleImages(dropDanglingToolUse(compact(compactHistoricalToolInputs(messages), emit, model)))
           .map(m => ({ ...m, content: stripThinking(m.content, plan.budget > 0) }))
       ),
       tools: cacheableTools(tools)
@@ -1086,6 +1286,11 @@ export async function runAgentLoop(o) {
             } else if (d.type === 'thinking_delta' && d.thinking) {
               emit({ type: 'thinking', text: d.thinking });
             }
+            // signature_delta is AgentRouter's encrypted thinking — no visible text
+            // but the model IS working. Reaching this callback already rearms the
+            // stall timer (withStallGuard calls __rearm on every event), so no
+            // extra code is needed here. The important thing is that we do NOT
+            // filter these events out before they reach the guard.
           }, signal);
           finalMsg = await stream.finalMessage();
         } else {
@@ -1129,6 +1334,12 @@ export async function runAgentLoop(o) {
           attempt++;
           await new Promise(r => setTimeout(r, 2000));
           continue;
+        }
+
+        // Auto-scale thinking budget if proxy times out at 120s
+        if ((msg.includes('terminated') || msg.includes('stall') || msg.includes('timeout') || msg.includes('econnreset')) && params.thinking && params.thinking.budget_tokens > 2048) {
+          params.thinking.budget_tokens = 2048;
+          emit({ type: 'notice', text: 'extended thinking hit proxy 120s limit — scaled to fast 2048 budget' });
         }
 
         if (!isTransient(err)) {
@@ -1214,31 +1425,43 @@ export async function runAgentLoop(o) {
 
     if (finalMsg.stop_reason !== 'tool_use') {
       // ── premature end_turn: nudge once per unfinished-work reason ───────────
-      //
-      // A model that stops talking is not necessarily a model that is finished. The two
-      // ways it gets this wrong: it narrates a plan and ends the turn without calling a
-      // single tool, or it works through part of its own todo list and stops early. Both
-      // used to end the run silently and surface as "finished without writing index.html".
-      //
-      // The nudge is capped per reason so a model that genuinely has nothing left to do
-      // cannot be pushed into a loop — it gets one chance to correct itself, then the run
-      // ends for real.
-      const unfinished = ctx.todos.filter(t => t.status !== 'done');
-      // Disk, not a tally of tool calls — the file is what the user gets, and a write that
-      // was declined or that failed should read as "not written" here.
       const entry = project.htmlFile || path.join(project.dir, 'index.html');
-      const entryWritten = (() => {
-        try { return fs.existsSync(entry) && fs.statSync(entry).size > 0; } catch (_) { return false; }
-      })();
+      let missingFiles = [];
+      let entryWritten = false;
+
+      if (fs.existsSync(entry)) {
+        try {
+          entryWritten = fs.statSync(entry).size > 0;
+          const html = fs.readFileSync(entry, 'utf-8');
+          const scriptMatches = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m => m[1]);
+          const cssMatches = [...html.matchAll(/<link[^>]+href=["']([^"']+\.css)["']/gi)].map(m => m[1]);
+          for (const rel of [...scriptMatches, ...cssMatches]) {
+            if (!/^https?:\/\//i.test(rel) && !rel.startsWith('data:')) {
+              const fullPath = path.resolve(project.dir, rel);
+              if (!fs.existsSync(fullPath)) {
+                missingFiles.push(rel);
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      const unfinished = ctx.todos.filter(t => t.status !== 'done');
 
       let nudge = null;
-      if (!entryWritten && entryNudgeCount < 10) {
+      if (!entryWritten && entryNudgeCount < 3) {
         entryNudgeCount++;
-        nudge = `You ended your turn but ${path.basename(entry)} does not exist on disk — nothing you described has actually been built yet. Write it now with write_file, then verify it with check_composition.`;
-      } else if (unfinished.length && todoNudgeCount < 15) {
+        nudge = `CRITICAL: You ended your turn with conversational text, but ${path.basename(entry)} does NOT exist on disk yet. Do NOT output conversational text, explanations, or promises. You MUST immediately invoke the write_file tool to create ${path.basename(entry)}, then verify it with check_composition.`;
+      } else if (missingFiles.length > 0 && entryNudgeCount < 4) {
+        entryNudgeCount++;
+        nudge = `CRITICAL: ${path.basename(entry)} references ${missingFiles.join(', ')}, but these files DO NOT exist on disk yet. The animation will not run without them. You MUST immediately invoke write_file to create ${missingFiles[0]}, then complete the remaining files.`;
+      } else if (toolCalls === 0 && entryNudgeCount < 2) {
+        entryNudgeCount++;
+        nudge = `CRITICAL: You explained your plan in chat text but did not execute any tools. You are an autonomous builder agent. You MUST invoke write_file or edit_file immediately to implement the required code.`;
+      } else if (unfinished.length && todoNudgeCount < 4) {
         todoNudgeCount++;
         const next = unfinished.map(t => `- [${t.status.toUpperCase()}] ${t.text}`).join('\n');
-        nudge = `You ended your turn with work still open on your own task list:\n${next}\n\nKeep going — carry on with the next item and use update_todos to mark progress. Do not stop until all items are done.`;
+        nudge = `You ended your turn with work still open on your task list:\n${next}\n\nDo not stop or narrate promises — immediately invoke the required tools to complete the open items and update_todos to mark them done.`;
       }
 
       if (nudge) {
@@ -1262,8 +1485,7 @@ export async function runAgentLoop(o) {
       const isFileTool = ['write_file', 'edit_file', 'read_file'].includes(block.name);
       if (isFileTool && (!block.input || typeof block.input !== 'object' || !block.input.path)) {
         const errDesc = `Tool call "${block.name}" failed: argument payload was truncated mid-stream before 'path' could be transmitted. ` +
-                        `Do NOT output massive single files (>120 lines) in one call. ` +
-                        `Split into modular files (index.html, style.css, script.js) or write the header with write_file and extend with edit_file.`;
+                        `Split into clean modular files (index.html, style.css, timeline.js).`;
         results.push(toolResultBlock(block.id, { isError: true, content: errDesc }));
         emit({ type: 'tool_result', id: block.id, name: block.name, summary: 'truncated arguments — path missing', isError: true });
         continue;

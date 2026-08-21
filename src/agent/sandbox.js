@@ -97,6 +97,7 @@ export const READ_ONLY_TOOLS = new Set([
   'list_sfx',
   'check_composition',
   'preview_frames',
+  'validate_seek',
   'update_todos',
   // Reading reference material is no different from reading a file.
   'list_skills',

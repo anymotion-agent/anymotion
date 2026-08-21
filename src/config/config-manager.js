@@ -38,19 +38,48 @@ export function resolveConfigPath() {
 /** Kept as a named export because the CLI prints it in `config` and `doctor`. */
 export const CONFIG_PATH = resolveConfigPath();
 
+export function detectProviderFromKey(key = '') {
+  const k = String(key || '').trim();
+  if (k.startsWith('sk-or-v1-')) return 'openrouter';
+  if (k.startsWith('sk-ant-')) return 'anthropic';
+  if (k.startsWith('gsk_')) return 'groq';
+  if (k.startsWith('sk-proj-') || k.startsWith('sk-admin-')) return 'openai';
+  if (k.startsWith('xai-')) return 'xai';
+  if (k.startsWith('fw_')) return 'fireworks';
+  if (k.startsWith('pplx-')) return 'perplexity';
+  return null;
+}
+
 export function resolveProvider(config = {}) {
+  const keyProvider = detectProviderFromKey(config.apiKey);
+  if (keyProvider) return keyProvider;
+
   if (config.provider && String(config.provider).trim()) {
     return String(config.provider).trim().toLowerCase();
   }
   const endpoint = String(config.apiEndpoint || '').toLowerCase();
   if (endpoint.includes('openrouter')) return 'openrouter';
-  if (endpoint.includes('opencode')) return 'opencode';
+  if (endpoint.includes('opencode.ai/zen/go')) return 'opencode-go';
+  if (endpoint.includes('opencode')) return 'opencode-zen';
   if (endpoint.includes('groq')) return 'groq';
   if (endpoint.includes('deepseek')) return 'deepseek';
   if (endpoint.includes('together')) return 'together';
   if (endpoint.includes('openai')) return 'openai';
+  if (endpoint.includes('generativelanguage.googleapis.com')) return 'gemini';
+  if (endpoint.includes('x.ai')) return 'xai';
+  if (endpoint.includes('mistral')) return 'mistral';
+  if (endpoint.includes('fireworks')) return 'fireworks';
+  if (endpoint.includes('perplexity')) return 'perplexity';
+  if (endpoint.includes('cerebras')) return 'cerebras';
+  if (endpoint.includes('sambanova')) return 'sambanova';
+  if (endpoint.includes('siliconflow')) return 'siliconflow';
+  if (endpoint.includes('11434')) return 'ollama';
+  if (endpoint.includes('1234')) return 'lmstudio';
   if (endpoint.includes('tokenrouter')) return 'tokenrouter';
+  if (endpoint.includes('kie.ai')) return 'kie';
+  if (endpoint.includes('piapi.ai')) return 'piapi';
   if (endpoint.includes('anthropic')) return 'anthropic';
+  if (endpoint.includes('agentrouter.org/v1')) return 'agentrouter-openai';
   if (endpoint.includes('agentrouter')) return 'agentrouter';
   return 'agentrouter';
 }
@@ -83,8 +112,23 @@ function apiKeyFromEnv() {
     process.env.ANTHROPIC_AUTH_TOKEN ||
     process.env.ANTHROPIC_API_KEY ||
     process.env.OPENROUTER_API_KEY ||
+    process.env.TOKENROUTER_API_KEY ||
+    process.env.OPENCODE_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    process.env.GROQ_API_KEY ||
+    process.env.DEEPSEEK_API_KEY ||
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
+    process.env.XAI_API_KEY ||
+    process.env.KIE_API_KEY ||
+    process.env.PIAPI_API_KEY ||
+    process.env.TOGETHER_API_KEY ||
+    process.env.MISTRAL_API_KEY ||
+    process.env.FIREWORKS_API_KEY ||
+    process.env.PPLX_API_KEY ||
+    process.env.CEREBRAS_API_KEY ||
+    process.env.SAMBANOVA_API_KEY ||
+    process.env.SILICONFLOW_API_KEY ||
     ''
   );
 }
@@ -148,8 +192,8 @@ export function loadConfig() {
     merged.apiKey = apiKeyFromEnv() || '';
   }
 
-  if (process.env.ANTHROPIC_BASE_URL) merged.apiEndpoint = process.env.ANTHROPIC_BASE_URL;
-  if (process.env.ANTHROPIC_MODEL) merged.model = process.env.ANTHROPIC_MODEL;
+  if (process.env.ANTHROPIC_BASE_URL && !parsed.apiEndpoint) merged.apiEndpoint = process.env.ANTHROPIC_BASE_URL;
+  if (process.env.ANTHROPIC_MODEL && !parsed.model) merged.model = process.env.ANTHROPIC_MODEL;
   if (process.env.ANYMOTION_PORT) {
     const p = parseInt(process.env.ANYMOTION_PORT, 10);
     if (Number.isFinite(p)) merged.port = p;

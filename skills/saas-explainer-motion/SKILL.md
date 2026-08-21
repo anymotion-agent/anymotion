@@ -1,32 +1,23 @@
 ---
 name: saas-explainer-motion
-description: Build a broadcast-quality animated SaaS product explainer as one self-contained HTML file — Apple-style Liquid Glass UI, a deterministic seek-based motion engine, cursor-led camera moves, shape morphing, match-cut scene transitions, and procedural Web Audio sound. Use when the user wants a product explainer, demo video, launch film, feature walkthrough, landing-page hero animation, or animated UI mockup.
+description: [PRIMARY CORE SKILL] Build a broadcast-quality animated SaaS product explainer as one self-contained HTML file — Apple-style Liquid Glass UI, a deterministic seek-based motion engine, cursor-led camera moves, shape morphing, match-cut scene transitions, and procedural Web Audio sound. Primary core skill for all Anymotion SaaS explainers, product demos, launch films, feature walkthroughs, hero animations, and UI mockups.
 ---
-
-# SaaS Explainer Motion
-
+# SaaS Explainer Motion (PRIMARY CORE SKILL)
 Build product explainer films in the browser. HTML/CSS/JS in, one
 self-contained file out that plays anywhere a browser does.
-
 The engine is deterministic: every visual is a pure function of time `t`. That
 single property is what separates this from a pile of CSS keyframes: you get a
 scrub bar, frame-accurate arrow-key stepping, and timing you can assert on in
 tests. Choreography becomes something you tune, not something you guess at.
-
 ---
-
 ## THE INPUTS THAT CHANGE THE BUILD
-
 What each input decides, and what it costs to get wrong. Where they come from —
 the request, a plan, a question — does not matter here.
-
 **The product's website, when there is one.** The highest-value input available:
 the real product name and tagline, the real feature copy, the accent colour, the
 typeface, the logo, and the shape of the actual UI. A film built from the real
 product beats a beautiful film about a generic dashboard.
-
 What to take from it, in priority order:
-
 1. **Product name and tagline**, exactly as written. Do not improve their copy.
 2. **The top features in the site's own words** — these become the scenes that
    demonstrate.
@@ -41,21 +32,17 @@ What to take from it, in priority order:
    states. "Invoices / Customers / Settings" is worth ten times "Item One".
 7. **Numbers**, with the attribution the site gives them. Numbers on a marketing
    site are claims, not facts. If one goes on screen, attribute it as they do.
-
 Then **rebuild that UI out of the glass components** — `.browser-frame`,
 `.sidebar`, `.row-item`, `.panel`, `.btn`. Never paste a screenshot as a flat
 image: it cannot zoom, cannot respond to a cursor, cannot animate a row sliding
 in, and it goes soft the moment the camera pushes in. Rebuilding is more work and
 it is the entire difference between a demo and a slideshow.
-
 Reproduce their layout and labels, simplify their density. A real app has forty
 rows and nineteen nav items; the rebuild has four rows and five nav items,
 because the film has to read at a glance. Keep their logo as inline SVG or a text
 lockup — do not redraw it badly.
-
 With no URL, or when fetching returns an empty JS shell, invent a plausible
 product, state the assumption in one line, and build. Do not stall on it.
-
 **Aspect ratio — settle this before writing any scenes.** `16:9` 1920×1080 is the
 default and covers landing pages, YouTube and decks; `1:1` 1080×1080 square feed;
 `9:16` 1080×1920 stories and Shorts; `4:5` 1080×1350 portrait feed. Positions
@@ -63,41 +50,32 @@ inside scenes are hand-placed pixels, so changing aspect afterwards means
 re-laying out every scene. It is the one decision that is expensive to change
 late. A 16:9 and a vertical cut are two compositions sharing one timeline, not
 one file with a CSS switch.
-
 **Where it will be watched** decides length and whether sound can be relied on. A
 landing-page hero loop is short and always muted. The outer limit anywhere is
 unearned attention from someone who did not choose to watch — that limit is the
 real constraint, not any particular number.
-
 **Sound.** `assets/sfx.js` synthesises everything in the browser: nothing to
 license, nothing to download, and it renders offline to a reproducible WAV.
 Either way the film must read correctly with sound off, because most autoplay is
 muted. Sound is a layer of polish, never a carrier of meaning.
-
 **Colour.** `data-preset="apple"` is the default: near-black, `#0A84FF` accent,
 Liquid Glass panels, SF-stack type. Presets: `apple`, `light`, `midnight`,
 `warm`, `mono`. Brand colours mean a hex accent and a light/dark preference.
-
 **Typeface.** Never ship the default system stack by accident. `-apple-system` is
 a deliberate choice for the Apple look, not a fallback to reach for because
 nobody picked. If a typeface is named or lives in the brand, use it; otherwise
 choose one that fits the product and say which and why. Pairing beats decorating:
 one display face for headlines, one quiet face for body, at most. See
 "Typography" for pairings and the licence trap.
-
 **The product itself.** One sentence on what it does. The single behaviour change
 you want in the viewer. Any real numbers, with sources — an unattributed stat
 reads as marketing.
-
 ---
-
 ## WRITE THE BEAT SHEET BEFORE THE CODE
-
 The beats below are the pattern that works, in the order that works. How many of
 them a given film uses, and how long each runs, is a composition decision — not
 something this document should make for you. What matters is the order:
 problem-first, so the product arrives as relief rather than as a feature list.
-
 | Beat | Job | Failure mode |
 |------|-----|--------------|
 | Hook | **Show** the pain. No narration, no headline first. | Opening on your logo |
@@ -107,9 +85,7 @@ problem-first, so the product arrives as relief rather than as a feature list.
 | Payoff | It worked. Let the moment land. | Rushing past it |
 | Proof | Counted numbers, attributed. | Unsourced stats |
 | End card | One action. Hold long enough to read it. | Three buttons |
-
 Rules that survive contact with real projects:
-
 - **Show, do not tell.** Six near-identical support tickets stacking up beats
   the sentence "support teams answer repetitive questions." The repetition *is*
   the argument. The headline only names what the viewer already noticed.
@@ -130,6 +106,36 @@ Rules that survive contact with real projects:
   screenshot.
 - **A cursor turns a mockup into a demo.** Move it with an arc, press, release,
   then let the UI respond one beat later. See "Cursor choreography" below.
+### Element-Level Animation Consistency Matrix
+In a broadcast-quality SaaS explainer, **every visible UI element** (badge, title, cards, metrics, buttons, icons, cursor) is animated, but with strict visual consistency:
+1. **Unified Entrance Curve:** Use `cubic-bezier(0.16, 1, 0.3, 1)` across ALL elements for smooth Apple-style spring entrance.
+2. **Staggered Delays:** Maintain a strict 60ms–80ms delay increment between sibling elements (e.g. `t+0.0s` headline, `t+0.08s` subtitle, `t+0.16s` card 1, `t+0.24s` card 2).
+3. **Shared Directional Vectors:** Sibling elements in the same container move in cohesive spatial directions (e.g. all slide `translateY(24px -> 0px)` + `opacity: 0 -> 1` or scale `0.95 -> 1.0`).
+4. **Continuous Micro-Idle Motion:** Elements during active holds are never 100% frozen: apply subtle 3D tilt, gentle floating (`translateY(-4px)` over 4s), pulsing metric counters, and shimmer sweeps.
+### Dynamic Music Selection & Sound Guidelines
+
+Music selection MUST match the vibe and category of the SaaS product:
+
+- **AI, Cloud, Developer, Security SaaS:** `dark_glass_synth` / `tech_ambient` (Futuristic, sleek, dark-mode synth pads & electronic pulses).
+- **Sales, Marketing, HR, Enterprise SaaS:** `upbeat_corporate` (Rhythmic, energetic, clean bass, driving tempo).
+- **Creative, Design, Productivity, Lifestyle SaaS:** `minimal_chill` (Lofi, organic, subtle synths, atmospheric).
+
+*Video Export Note:* Rendered MP4 files provide a clean visual export with background soundtrack backing; raw un-synced scene audio pops are excluded from video render to prevent audio clipping.
+
+### Liquid Glassmorphism & Specular Spec
+
+Modern SaaS explainers use Apple Liquid Glass UI cards:
+- `backdrop-filter: blur(24px) saturate(180%)`
+- `background: rgba(255, 255, 255, 0.04)`
+- `border: 1px solid rgba(255, 255, 255, 0.12)`
+- `box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+- 3D Perspective Tilt: `transform: perspective(1200px) rotateX(4deg) rotateY(-2deg)`
+
+### Real Assets Harvest Strategy
+
+The agent prioritizes real artwork and SVG logos even if the user didn't explicitly supply asset links:
+- **Brand SVG Logos:** SimpleIcons CDN `https://cdn.simpleicons.org/{brand}` via `fetch_asset` (e.g., spotify, stripe, slack, figma, notion, github, google, discord).
+- **App Icons & Artwork:** iTunes API / Unsplash direct image links.
 
 ### The one-sentence test
 
@@ -240,6 +246,40 @@ single clearest tell of an amateur explainer.
 
 ---
 
+## VIDEO-DERIVED KNOWLEDGE: APPLY AFTER THE CORE BEAT SHEET
+
+The supplied reference videos add a practical layer to the core rules above. First classify the asset: a social hook, a functional product demo, an enterprise sales film, a hero loop, or a portfolio/concept showcase. A portfolio montage may optimize visual variety and rewatch value; a product demo must optimize comprehension. Do not use a four-panel showcase as a direct SaaS explanation unless variety is the brief.
+
+### The transformation patterns that repeatedly worked
+
+- **Pain → relief:** Show app sprawl, stacked notifications, dormant records, missed leads, or a messy workflow before showing the product.
+- **Dream → barriers → possibility:** For creator/no-code tools, show the desired outcome, then coding/design/budget barriers, then the product turning the abandoned idea into a testable output.
+- **Ask → refine → decide:** For AI search, show one natural-language request, a conversational refinement, a focused result, comparison/understanding, and the downstream action.
+- **Notification → feature → interaction:** For mobile concepts, enter from a believable OS notification, reveal one feature, show one interaction, then state the benefit. Mark speculative or unofficial concepts clearly.
+- **Persona → workflow → proof:** For enterprise AI, give each named agent/persona one job, one workflow, and one outcome; then show visibility, integrations, compliance, human handoff, and one CTA.
+
+### Practical scene rules learned from the videos
+
+Start with motion, contrast, a question, a notification, or a concrete pain—not a logo. Keep one idea per scene and let the visual land before explanatory copy. A focused UI crop beats a full dashboard: sidebar, about four rows, one focal panel, and enough whitespace to establish hierarchy. Use recognizable logos only when approved and when they clarify the pain; do not imply partnerships accidentally.
+
+Make every important interaction visible: a cursor arriving on an arc, settling, pressing, releasing, then a delayed UI response. Use hand cursors for mobile/social concepts and conventional pointers for desktop software. Meaningful targets include Create, Send, Speak, Open, Confirm, Contact, and Reactivate. Do not teleport the pointer or aim at arbitrary numbers.
+
+Give camera moves a job. Push/dive in for discovery or detail; pull out for system overview or relief; orbit for chaos; snap scale/overshoot for confirmation; tunnel through for entering a new product stage. Carry an active direction, object, camera path, or UI element across cuts. Fast motion is useful for retention, but hold the payoff and slow or simplify any text that cannot be read on first viewing.
+
+### Copy, proof, and realism
+
+Use user language, verbs, contrast, and numbers rather than generic adjectives. Prefer “Ask once instead of managing six filters” to “AI-powered discovery platform.” Keep on-screen copy short; do not duplicate a long VO line. Check VO, copy, and UI state frame-accurately because even a small mismatch weakens premium polish.
+
+AI demos must show more than a “Thinking…” state or decorative code scroll: show the useful result, context, editability, confidence/approval, or human handoff. Metrics and ROI claims require an approved source, attribution, timeframe, and qualification; otherwise use qualitative proof. Brand-faithful concept work must not imply that an unofficial feature is live or endorsed.
+
+### Visual, audio, and conversion additions
+
+Use dark charcoal plus one electric accent for premium AI/search/security; soft light backgrounds plus restrained cyan/magenta/lime gradients for approachable enterprise automation; and exact product colours/type/UI cues for brand-led announcements. Reserve the accent for focus, active, live, selected, success, or CTA states.
+
+Turn dry data into an event: personal recap, live pulse, progress ring, comparison winner, converging cards, typing indicator, or notification stack. These are communication devices, not decoration. Use music for category mood, VO for meaning, and clicks/pops/whooshes/typing/pings for tactile confirmation. The story must still work muted.
+
+Choose one CTA—Book a demo, Start trial, Try it, or Learn more—and hold it long enough to read. Before delivery, test muted playback, 25% scale, the first three seconds, claim attribution, scene clarity, cursor hotspot, accessibility of rapid motion, and deterministic seeking. Judge the film by clarity per second, not visual complexity per second.
+
 ## BUILD
 
 Copy `assets/` into the project, then write two files: markup and timeline.
@@ -273,6 +313,14 @@ mount time. Your own timeline file last.
 
 ```html
 <body data-preset="apple">
+  <!-- Brand-Adaptive Animated Mesh Background -->
+  <div class="bg-wash" aria-hidden="true">
+    <div class="bg-orb bg-orb-a"></div>
+    <div class="bg-orb bg-orb-b"></div>
+    <div class="bg-orb bg-orb-c"></div>
+    <div class="bg-grain"></div>
+  </div>
+
   <div class="viewport"><div class="stage">
     <div class="camera" data-el="camera">          <!-- push-ins and pans go here -->
       <section class="scene" data-scene="hook">
@@ -283,7 +331,9 @@ mount time. Your own timeline file last.
       </section>
 
       <!-- Cursor + ring: last children of .camera, OUTSIDE every scene. -->
-      <div class="cursor" data-el="cursor" style="left:0; top:0; opacity:0;"></div>
+      <svg class="cursor cursor--pointer" data-el="cursor" viewBox="0 0 20 22" style="left:0; top:0; opacity:0;" aria-hidden="true">
+        <path d="M6 1C5.2 1 4.5 1.7 4.5 2.5V11.2C4 10.7 3.3 10.4 2.6 10.5C1.5 10.7 0.7 11.7 0.9 12.8C1.3 15.5 3.3 19.5 7 19.5H12C15 19.5 16.5 17.2 16.5 14.2V9.5C16.5 8.7 15.8 8 15 8C14.7 8 14.4 8.1 14.2 8.3C13.9 7.5 13.2 7 12.3 7C11.9 7 11.5 7.2 11.2 7.4C10.8 6.6 10 6 9 6C8.8 6 8.6 6.1 8.4 6.1V2.5C8.4 1.7 7.7 1 6 1Z" fill="#0f172a" stroke="#ffffff" stroke-width="1.4"/>
+      </svg>
       <div class="click-ring" data-el="ring" style="left:0; top:0;"></div>
     </div>
   </div></div>
@@ -885,54 +935,150 @@ Two consequences worth stating, because both are easy to get backwards:
   system arrow is the single fastest way to make a product film look like a
   screen recording of somebody's laptop.
 
-### Always an arrow. Vary the styling, never the shape
+### Professional 7-Variant Cursor Suite & Interaction Styles
 
-**The in-film pointer is an arrow in every film.** A dot, disc, or ring is
-ambiguous about *what* it is pointing at — the entire job of this element is to
-say "this control, right here", and only a tip does that. A disc hovering over a
-button leaves the viewer deciding whether it means the button, the label, or the
-row; an arrow tip removes the question.
+The in-film pointer is an essential storytelling element that directs viewer focus. To match modern SaaS explainer standards, the agent supports **7 distinct cursor variants** tailored for specific UI interactions:
 
-So what changes between films is the **styling**, never the silhouette. The base
-`.cursor` rule owns the geometry — height from `--cursor-size`, width derived
-from the path aspect (`0.709`) so a size change can never squash it, tip at the
-origin. Four variants restyle it and touch nothing dimensional:
+| Cursor Variant | Visual Silhouette | SVG / CSS Class | Best Used For |
+|---|---|---|---|
+| **1. Default Pointer** | Solid dark curved arrow | `.cursor--default` | Default navigation, general pointing |
+| **2. Pointing Hand** | Index finger pointing hand | `.cursor--pointer` | Hovering and clicking buttons, links, tabs, and CTA controls |
+| **3. Outlined Wireframe** | Hollow outline arrow | `.cursor--outline` | Dense UI overlays where text beneath must remain readable |
+| **4. Sharp Tech Arrow** | Geometric 45° sharp tip | `.cursor--sharp` | Developer tools, terminal CLIs, and technical SaaS explainers |
+| **5. 3D Vibrant Accent** | Coral/Red 3D offset shadow | `.cursor--vibrant` | High-impact hero shots, primary CTA focus beats |
+| **6. Grab Hand** | Closed fist / drag hand | `.cursor--grab` | Dragging cards, reordering lists, canvas pan & zoom |
+| **7. I-Beam Selector** | Vertical text I-beam | `.cursor--ibeam` | Typing into search bars, input forms, and code editors |
 
-| Class | Read | Use it when |
-|---|---|---|
-| `.cursor` | Solid fill, dark rim | Default. Legible over anything. |
-| `.cursor--glass` | Translucent body, bright rim | Liquid Glass scenes on a dark preset. |
-| `.cursor--accent` | Filled with the brand colour | The cursor is the subject of the shot. |
-| `.cursor--outline` | Hollow, drawn in the accent | The UI underneath must stay readable through it. |
-| `.cursor--soft` | Rounded silhouette, no visible rim | Friendlier, consumer-facing films. |
+#### SVG Definitions for the 7 Cursor Shapes
 
-Pick one per film and stay with it. A pointer that changes costume mid-film reads
-as an accident, not a choice.
+```html
+<!-- 1. Default Curved Pointer -->
+<svg class="cursor cursor--default" data-el="cursor" viewBox="0 0 16 22" style="left:0; top:0; opacity:0;" aria-hidden="true">
+  <path d="M0 0 L0 18.5 C0.5 18.5 1 18 1.5 17.5 L4.8 14.2 L7.8 21.2 L10.8 19.8 L7.8 12.8 L14.8 12.8 C15.5 12.8 15.8 12 15.2 11.5 Z" fill="#0f172a" stroke="#ffffff" stroke-width="1.2"/>
+</svg>
 
-`.cursor--soft` is the one with a trick in it: `paint-order: stroke` lays a fat
-round-joined stroke *underneath* the fill, which is what rounds the polygon's
-corners off. The stroke colour therefore has to match the fill, or the rounding
-shows up as a halo.
+<!-- 2. Pointing Hand (Click Target) -->
+<svg class="cursor cursor--pointer" data-el="cursor" viewBox="0 0 20 22" style="left:0; top:0; opacity:0;" aria-hidden="true">
+  <path d="M6 1C5.2 1 4.5 1.7 4.5 2.5V11.2C4 10.7 3.3 10.4 2.6 10.5C1.5 10.7 0.7 11.7 0.9 12.8C1.3 15.5 3.3 19.5 7 19.5H12C15 19.5 16.5 17.2 16.5 14.2V9.5C16.5 8.7 15.8 8 15 8C14.7 8 14.4 8.1 14.2 8.3C13.9 7.5 13.2 7 12.3 7C11.9 7 11.5 7.2 11.2 7.4C10.8 6.6 10 6 9 6C8.8 6 8.6 6.1 8.4 6.1V2.5C8.4 1.7 7.7 1 6 1Z" fill="#0f172a" stroke="#ffffff" stroke-width="1.4"/>
+</svg>
 
-Colour comes from `--cursor-*` tokens, and `--cursor-core` derives from
-`--accent`, so **every preset themes its own arrow with no per-preset block**.
-The light preset is the exception and overrides them deliberately: a white arrow
-on `#F5F5F7` is invisible, so the fill inverts to near-black and the rim flips
-light, because there the rim's job is separating a dark arrow from a light
-background rather than the reverse.
+<!-- 3. Outlined Wireframe -->
+<svg class="cursor cursor--outline" data-el="cursor" viewBox="0 0 16 22" style="left:0; top:0; opacity:0;" aria-hidden="true">
+  <path d="M1.5 1.5 L1.5 17 L5.2 13.5 L8.2 20.2 L10.8 19 L7.8 12.3 L13.5 12.3 Z" fill="none" stroke="#25e6f0" stroke-width="2" stroke-linejoin="round"/>
+</svg>
 
-Two more constraints that are not obvious:
+<!-- 4. Sharp Tech Arrow -->
+<svg class="cursor cursor--sharp" data-el="cursor" viewBox="0 0 18 22" style="left:0; top:0; opacity:0;" aria-hidden="true">
+  <path d="M0 0 L16 16 L9 16 L12.5 23 L9.5 24.2 L6 17 L0 21 Z" fill="#020617" stroke="#38bdf8" stroke-width="1.2"/>
+</svg>
 
-- **Put the cursor markup as the last children of `.camera`, outside every
-  scene.** Inside a scene, the cut takes the cursor with it — it vanishes at the
-  boundary. Inside `.camera`, it scales with a push-in the way a real pointer
-  would.
-- **The cursor must not use `backdrop-filter`.** A scene mid-dissolve has
-  `opacity < 1`, which makes it a backdrop root, and any `backdrop-filter` inside
-  silently goes flat. The arrow uses `drop-shadow` instead — which is also what
-  keeps it legible over a light card and a dark hero alike.
+<!-- 5. 3D Vibrant Coral Accent -->
+<svg class="cursor cursor--vibrant" data-el="cursor" viewBox="0 0 20 26" style="left:0; top:0; opacity:0;" aria-hidden="true">
+  <defs>
+    <filter id="cursor-3d-shadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="2" dy="4" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <path d="M1 1 L1 22 L6.2 17 L10.2 25 L14.2 23 L10.2 15 L18 15 Z" fill="#ff4757" stroke="#ffffff" stroke-width="1.8" filter="url(#cursor-3d-shadow)"/>
+</svg>
 
-### The camera follows the cursor
+<!-- 6. Grab / Drag Fist -->
+<svg class="cursor cursor--grab" data-el="cursor" viewBox="0 0 20 20" style="left:0; top:0; opacity:0;" aria-hidden="true">
+  <path d="M3 6C3 4.9 3.9 4 5 4C5.3 4 5.6 4.1 5.8 4.2C6.1 3.5 6.8 3 7.6 3C8.3 3 8.9 3.4 9.2 4C9.5 3.4 10.1 3 10.8 3C11.7 3 12.4 3.6 12.6 4.4C12.9 4.1 13.4 4 13.8 4C14.9 4 15.8 4.9 15.8 6V10.5C15.8 14.1 13.3 17 9.7 17H8.3C5.4 17 3 14.6 3 11.7V6Z" fill="#0f172a" stroke="#ffffff" stroke-width="1.4"/>
+</svg>
+
+<!-- 7. I-Beam Text Selector -->
+<svg class="cursor cursor--ibeam" data-el="cursor" viewBox="0 0 12 20" style="left:0; top:0; opacity:0;" aria-hidden="true">
+  <path d="M1 2 H11 M6 2 V18 M1 18 H11" stroke="#0f172a" stroke-width="2.2" stroke-linecap="round"/>
+</svg>
+```
+
+#### Dynamic Cursor Morphing & Context Switching
+
+When constructing explainer animations:
+1. **Match Cursor to Action**: Use `.cursor--pointer` on buttons, `.cursor--ibeam` on input fields, `.cursor--grab` when dragging cards/canvases, and `.cursor--vibrant` for hero callouts.
+2. **Context Switching in Timeline**: Switch cursor classes or SVG shapes dynamically as the cursor moves from one UI component to another (`tl.cursorType(...)` or updating `data-cursor-style`).
+
+### Brand-Adaptive Animated Mesh & Gradient Background System
+
+Every SaaS product explainer requires a **custom, brand-adaptive animated background system**. Generic static backgrounds or cheap particle sparkles degrade perceived product value. Instead, use ambient floating mesh gradient orbs, tactile SVG micro-grain filters, and category-tailored color palettes:
+
+```css
+/* Animated Ambient Mesh Background Wash */
+.bg-wash {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg-base, #050814);
+}
+
+.bg-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(80px);
+  opacity: 0.45;
+  will-change: transform;
+}
+
+.bg-orb-a {
+  top: -15%;
+  left: 20%;
+  width: 60vw;
+  height: 60vw;
+  background: radial-gradient(circle, var(--brand-orb-1, #6366f1) 0%, transparent 70%);
+  animation: orbFloatA 22s ease-in-out infinite alternate;
+}
+
+.bg-orb-b {
+  bottom: -20%;
+  right: 15%;
+  width: 55vw;
+  height: 55vw;
+  background: radial-gradient(circle, var(--brand-orb-2, #a855f7) 0%, transparent 70%);
+  animation: orbFloatB 26s ease-in-out infinite alternate;
+}
+
+.bg-orb-c {
+  top: 35%;
+  left: -10%;
+  width: 45vw;
+  height: 45vw;
+  background: radial-gradient(circle, var(--brand-orb-3, #06b6d4) 0%, transparent 70%);
+  animation: orbFloatC 18s ease-in-out infinite alternate;
+}
+
+.bg-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+}
+
+@keyframes orbFloatA {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(80px, 60px) scale(1.15); }
+}
+
+@keyframes orbFloatB {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-70px, -50px) scale(1.1); }
+}
+
+@keyframes orbFloatC {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(50px, -40px) scale(1.08); }
+}
+```
+
+#### Category Brand Color Presets
+
+| Product Category | Palette Name | Base Color | Primary Orb | Secondary Orb | Accent Wash |
+|---|---|---|---|---|---|
+| **AI / DeepTech / LLM** | Cosmic Midnight | `#050814` | `#6366f1` (Indigo) | `#a855f7` (Purple) | `#06b6d4` (Cyan) |
+| **Fintech / Cloud / Security** | Oceanic Navy | `#030712` | `#1e3a8a` (Deep Blue) | `#0284c7` (Sky) | `#10b981` (Emerald) |
+| **Creative / Design / Marketing** | Velvet Coral | `#09090b` | `#f43f5e` (Rose) | `#fb923c` (Orange) | `#8b5cf6` (Violet) |
+| **B2B SaaS Light Theme** | Pearl Slate | `#f8fafc` | `#c2d8ff` (Light Blue) | `#ddd6fe` (Lavender) | `#bae6fd` (Soft Sky) |
 
 **Wherever the cursor goes, the camera goes.** This is what makes a UI scene feel
 like someone is being shown something rather than a slideshow of crops. The

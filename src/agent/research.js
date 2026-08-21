@@ -63,7 +63,29 @@ async function getText(url, signal) {
     signal: signal || AbortSignal.timeout(PAGE_TIMEOUT)
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return res.text();
+  let html = await res.text();
+
+  // Modern websites define their brand colors in external CSS (Tailwind, Webpack bundles, etc).
+  // Fetching the first few stylesheets and appending them gives extractPalette the CSS it needs.
+  try {
+    const cssLinks = [...html.matchAll(/<link[^>]+rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/gi)].map(m => m[1]);
+    const cssUrls = [];
+    for (const link of cssLinks) {
+      try { cssUrls.push(new URL(link, url).href); } catch (_) {}
+    }
+    for (const cssUrl of cssUrls.slice(0, 3)) {
+      if (signal?.aborted) break;
+      try {
+        const cssRes = await fetch(cssUrl, {
+          headers: { 'User-Agent': UA },
+          signal: signal || AbortSignal.timeout(3000)
+        });
+        if (cssRes.ok) html += '\n<style>\n' + (await cssRes.text()) + '\n</style>\n';
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  return html;
 }
 
 /**
@@ -167,6 +189,7 @@ export async function researchBrief(text, opts = {}) {
     emit({
       type: 'page',
       url,
+      brand,
       detail: `${brand.colors.length} colours · ${brand.fonts.length} typefaces · ${brand.assets.length} assets`
     });
 
@@ -181,7 +204,7 @@ export async function researchBrief(text, opts = {}) {
           const sub = extractBrand(await getText(next, signal), next);
           brands.push(sub);
           blocks.push(formatBrand(sub, next));
-          emit({ type: 'page', url: next, detail: `${sub.copy.length} copy blocks` });
+          emit({ type: 'page', url: next, brand: sub, detail: `${sub.copy.length} copy blocks` });
         } catch (err) {
           emit({ type: 'fail', url: next, detail: err.message });
         }
@@ -249,8 +272,9 @@ export async function researchBrief(text, opts = {}) {
       ...deadAssets.map(a => `  ✗ ${a.url} — ${a.why}`)
     );
   }
-  if (failures.length) {
-    parts.push('', `Could not read: ${failures.map(f => `${f.url} (${f.why})`).join(', ')}`);
+  const primaryFailures = failures.filter(f => urls.includes(f.url));
+  if (primaryFailures.length) {
+    parts.push('', `Could not read primary URLs: ${primaryFailures.map(f => `${f.url} (${f.why})`).join(', ')}`);
   }
 
   return { urls, brands, liveAssets, deadAssets, block: parts.join('\n') };

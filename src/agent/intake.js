@@ -57,7 +57,7 @@ You have three ways to finish:
 
 If the message contains a URL, read it with research_site BEFORE you call create_plan. Never skip this. The site carries the palette, the typefaces, the logo and the product's own wording; a plan written without them is a plan built on guesses that the build then has to fight. This is the single highest-value thing you can do.
 
-If the request names a technique your loaded guidance does not cover — React animation, SVG path morphing — check list_skills and load_skill the one that fits, so the plan is written knowing what the build will actually be able to do.
+If the request names a technique your loaded guidance does not cover — sound design, SVG path morphing, React animation, an animation performance limit — check list_skills and load_skill every one that fits, so the plan is written knowing what the build will actually be able to do.
 
 # Settle these four before you plan
 
@@ -148,8 +148,9 @@ function intakeTools() {
     {
       name: 'load_skill',
       description:
-        'Read one skill by name, so the brief is written knowing what the build can do. Load at most ' +
-        'one at this stage — the build stage can load more once it knows what it needs.',
+        'Read a skill by name, so the brief is written knowing what the build can do. Load each one ' +
+        'whose subject the request clearly touches — sound design, path morphing, React output, ' +
+        'animation performance. The build stage can load more once it knows what it needs.',
       input_schema: {
         type: 'object',
         properties: { name: { type: 'string', description: 'Exact name from list_skills.' } },

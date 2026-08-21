@@ -281,7 +281,40 @@ export async function renderVideo(options = {}) {
       }
     }
 
-    const duration = await page.evaluate(() => window.DURATION || 10.0);
+    const duration = await page.evaluate(() => {
+      const candidates = [];
+      try {
+        if (typeof window.DURATION === 'number' && window.DURATION > 0) {
+          candidates.push(window.DURATION >= 500 ? window.DURATION / 1000 : window.DURATION);
+        }
+      } catch (_) {}
+      try {
+        if (typeof window.PROJECT_DURATION === 'number' && window.PROJECT_DURATION > 0) {
+          candidates.push(window.PROJECT_DURATION >= 500 ? window.PROJECT_DURATION / 1000 : window.PROJECT_DURATION);
+        }
+      } catch (_) {}
+      try {
+        if (typeof window.TOTAL_DURATION === 'number' && window.TOTAL_DURATION > 0) {
+          candidates.push(window.TOTAL_DURATION >= 500 ? window.TOTAL_DURATION / 1000 : window.TOTAL_DURATION);
+        }
+      } catch (_) {}
+      try {
+        if (window.__EXPLAINER__ && typeof window.__EXPLAINER__.duration === 'number' && window.__EXPLAINER__.duration > 0) {
+          const d = window.__EXPLAINER__.duration;
+          candidates.push(d >= 500 ? d / 1000 : d);
+        }
+      } catch (_) {}
+      try {
+        if (window.tl && typeof window.tl.duration === 'number' && window.tl.duration > 0) {
+          const d = window.tl.duration;
+          candidates.push(d >= 500 ? d / 1000 : d);
+        }
+      } catch (_) {}
+
+      const valid = candidates.filter(d => Number.isFinite(d) && d > 0.5 && d <= 600);
+      if (valid.length > 0) return Math.max(...valid);
+      return 10.0;
+    });
     if (!Number.isFinite(duration) || duration <= 0) {
       throw new Error(`The composition reported an invalid window.DURATION (${duration}).`);
     }
