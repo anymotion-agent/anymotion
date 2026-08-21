@@ -284,71 +284,40 @@ function extractPalette(html) {
   const rankedChromatic = rank(chromatic);
   const rankedMonochrome = rank(monochrome);
 
-  // Require chromatic colors to come from branding sources (Meta, CSS Var, CTA, SVG, Hex, Tailwind)
-  const verifiedChromatic = rankedChromatic.filter(b => 
+  // Authoritative chromatic candidates: from meta theme-color, css variables, cta buttons, or strong recurring accents
+  const authoritativeChromatic = rankedChromatic.filter(b => 
     b.sources.has('meta') || 
     b.sources.has('css-var') || 
     b.sources.has('cta') ||
-    b.sources.has('svg') ||
-    ((b.sources.has('hex') || b.sources.has('tailwind')) && (b.count >= 2 || b.score >= 5))
+    ((b.sources.has('svg') || b.sources.has('hex') || b.sources.has('tailwind')) && b.count >= 3 && b.score >= 20)
   );
-
-  const chromaticPool = verifiedChromatic.length > 0 ? verifiedChromatic : rankedChromatic;
-
-  const sortMonochromeLuxury = (monos) => {
-    const hexes = monos.map(m => m.hex.toLowerCase());
-    const darks = hexes.filter(h => {
-      const p = parseColor(h);
-      return p && toHsl(p).l <= 0.20;
-    });
-    const lights = hexes.filter(h => {
-      const p = parseColor(h);
-      return p && toHsl(p).l >= 0.82;
-    });
-    const mids = hexes.filter(h => !darks.includes(h) && !lights.includes(h));
-
-    const result = [];
-    if (darks.includes('#000000')) result.push('#000000');
-    else if (darks.length) result.push(darks[0]);
-    else result.push('#000000');
-
-    if (lights.includes('#ffffff')) result.push('#ffffff');
-    else if (lights.length) result.push(lights[0]);
-    else result.push('#ffffff');
-
-    darks.filter(d => !result.includes(d)).forEach(d => result.push(d));
-    lights.filter(l => !result.includes(l)).forEach(l => result.push(l));
-    mids.filter(m => !result.includes(m)).forEach(m => result.push(m));
-
-    return result.slice(0, 5);
-  };
 
   const sumScores = (map) => [...map.values()].reduce((acc, b) => acc + b.score, 0);
   const totalChromaticScore = sumScores(chromatic);
   const totalMonochromeScore = sumScores(monochrome);
 
-  // If a site is 90%+ monochrome and has no chromatic accents anywhere, it is a Luxury Monochrome brand (ElevenLabs, Apple, Vercel)
-  const isDominantMonochrome = chromaticPool.length === 0 || (totalChromaticScore < 0.10 * totalMonochromeScore && !chromaticPool.some(b => b.sources.has('meta') || b.sources.has('css-var') || b.sources.has('cta')));
+  // If there are NO authoritative chromatic sources AND chromatic score is a small fraction (< 28%) of monochrome, it is a LUXURY MONOCHROME brand (ElevenLabs, Apple, Vercel, Linear)
+  const isDominantMonochrome = authoritativeChromatic.length === 0 || 
+    (totalChromaticScore < 0.28 * totalMonochromeScore && !authoritativeChromatic.some(b => b.sources.has('meta') || b.sources.has('css-var')));
 
   let finalColors = [];
-  if (!isDominantMonochrome && chromaticPool.length >= 3) {
-    // Multi-color brand (e.g. Supabase, Stripe, Imagine.art)
-    finalColors = chromaticPool.slice(0, 5).map(b => b.hex);
-  } else if (!isDominantMonochrome && chromaticPool.length > 0) {
-    // Brand with 1 or 2 strong accents + signature dark/light neutrals
-    const monoPicks = sortMonochromeLuxury(rankedMonochrome);
+  if (!isDominantMonochrome && authoritativeChromatic.length >= 2) {
+    // Multi-accent chromatic brand (e.g. Imagine.art, Supabase, Stripe)
+    finalColors = authoritativeChromatic.slice(0, 5).map(b => b.hex);
+  } else if (!isDominantMonochrome && authoritativeChromatic.length === 1) {
+    // Single-accent chromatic brand (e.g. Higgsfield Lime #d1fe17)
     finalColors = [
-      ...chromaticPool.map(b => b.hex),
-      ...monoPicks.slice(0, 5 - chromaticPool.length)
+      authoritativeChromatic[0].hex,
+      '#000000', '#ffffff', '#18181b', '#71717a'
     ];
   } else {
-    // Luxury monochrome brand (e.g. ElevenLabs, Apple, Vercel, Linear)
-    finalColors = sortMonochromeLuxury(rankedMonochrome);
+    // Luxury monochrome brand (ElevenLabs, Apple, Vercel, Linear, OpenAI)
+    finalColors = ['#000000', '#ffffff', '#18181b', '#27272a', '#71717a'];
   }
 
   const finalNeutrals = ['#000000', '#ffffff'];
 
-  return { colors: finalColors, neutrals: finalNeutrals };
+  return { colors: finalColors, neutrals: finalNeutrals, isDominantMonochrome, authoritativeChromatic };
 }
 
 /** Resolves a possibly-relative asset URL against the page it was found on. */
@@ -364,7 +333,7 @@ function absolutize(href, base) {
  * Detects the semantic brand theme: theme mode (dark vs light), background colors,
  * primary and secondary brand accents, contrast typography colors, and glassmorphism tokens.
  */
-export function detectTheme(html, colors = [], neutrals = []) {
+export function detectTheme(html, colors = [], neutrals = [], isDominantMonochrome = false) {
   let isDark = false;
   let bgPrimary = '#080a10';
   let bgSecondary = '#121620';
@@ -434,12 +403,16 @@ export function detectTheme(html, colors = [], neutrals = []) {
     return p && toHsl(p).s >= 0.25 && toHsl(p).l > 0.15 && toHsl(p).l < 0.88;
   });
 
-  let primaryAccent = chromatic[0] || (isDark ? '#00cbd6' : '#2563eb');
-  let secondaryAccent = chromatic[1] || (isDark ? '#818cf8' : '#4f46e5');
+  let primaryAccent = '#ffffff';
+  let secondaryAccent = '#a1a1aa';
 
-  if (!chromatic.length) {
+  if (!isDominantMonochrome && chromatic.length > 0) {
+    primaryAccent = chromatic[0];
+    secondaryAccent = chromatic[1] || (isDark ? '#e4e4e7' : '#52525b');
+  } else {
+    // True Luxury Monochrome Brand (ElevenLabs, Apple, Vercel, Linear)
     primaryAccent = isDark ? '#ffffff' : '#09090b';
-    secondaryAccent = isDark ? '#94a3b8' : '#475569';
+    secondaryAccent = isDark ? '#a1a1aa' : '#52525b';
   }
 
   const textColor = isDark ? '#ffffff' : '#09090b';
@@ -449,6 +422,7 @@ export function detectTheme(html, colors = [], neutrals = []) {
 
   return {
     mode: isDark ? 'dark' : 'light',
+    isLuxuryMonochrome: isDominantMonochrome,
     bgPrimary,
     bgSecondary,
     primaryAccent,
@@ -476,8 +450,8 @@ export function extractBrand(html, url) {
   // Colours: the few the brand owns, told apart from the greys and near-whites the page
   // uses for surfaces. See extractPalette — ranking every literal value by frequency is
   // what used to hand the planner fourteen "brand colours".
-  const { colors, neutrals } = extractPalette(html);
-  const theme = detectTheme(html, colors, neutrals);
+  const { colors, neutrals, isDominantMonochrome } = extractPalette(html);
+  const theme = detectTheme(html, colors, neutrals, isDominantMonochrome);
 
   // Fonts: Google Fonts links first (they name the family unambiguously), then any
   // font-family declaration left in inline CSS.
@@ -536,7 +510,10 @@ export function formatBrand(brand, url) {
   
   if (brand.theme) {
     out.push(`\n### 🎨 BRAND THEME & COLOR ROLE SYSTEM (STRICT BINDING):`);
-    out.push(`• Theme Mode: ${brand.theme.mode.toUpperCase()} MODE (Must strictly match website branding)`);
+    const modeDesc = brand.theme.isLuxuryMonochrome
+      ? `${brand.theme.mode.toUpperCase()} MODE (Luxury Monochrome Minimalist - Pure Black, White, Charcoal & Silver)`
+      : `${brand.theme.mode.toUpperCase()} MODE (Chromatic Brand - Primary Accent: ${brand.theme.primaryAccent})`;
+    out.push(`• Theme Mode: ${modeDesc}`);
     out.push(`• Background Canvas (--bg-primary): ${brand.theme.bgPrimary} (Stage canvas background)`);
     out.push(`• Surface/Card Background (--bg-secondary): ${brand.theme.bgSecondary} (Backdrop panels & secondary containers)`);
     out.push(`• Primary Brand Accent (--accent-primary): ${brand.theme.primaryAccent} (Key highlight, hero badges, active buttons, neon glow)`);
