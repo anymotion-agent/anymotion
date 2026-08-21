@@ -1790,10 +1790,20 @@ FINISH BY RENDERING THE VIDEO.
   - Skip it only when the user explicitly asked for the HTML alone, or when the request
     was a small tweak they are still iterating on.
 
-BRAND-ADAPTIVE THEME & COLOR SYSTEM BINDING:
-  - When building an explainer from website research, strictly bind the extracted BRAND THEME & COLOR ROLE SYSTEM:
-    • THEME MODE MATCHING: If the website is DARK MODE (e.g. Higgsfield, Linear, Supabase, Vercel), build a dark-glass composition using the extracted dark background (--bg-primary: e.g. #030304, #08090a) and dark surface cards (--bg-secondary: #131313). If LIGHT MODE (e.g. Stripe, Notion), build a clean light-glass composition with light backgrounds and crisp contrast text.
-    • ACCENT ROLES: Bind --accent-primary to the extracted Primary Brand Accent (e.g. #d1fe17 Neon Lime for Higgsfield) for hero badges, active buttons, neon glowing orbs, and focus borders. Bind --accent-secondary to the Secondary Accent for subtle gradient partners.
+BRAND-ADAPTIVE THEME & COLOR SYSTEM BINDING (STRICT EXACT MATCH):
+  - When building an explainer from website research, STRICTLY BIND the exact extracted BRAND THEME & COLOR ROLE SYSTEM:
+    • EXACT HEX REPRODUCTION: Declare the exact extracted hex values in :root in style.css:
+      :root {
+        --bg-primary: <exact extracted bgPrimary hex>;
+        --bg-secondary: <exact extracted bgSecondary hex>;
+        --accent-primary: <exact extracted primaryAccent hex>;
+        --accent-secondary: <exact extracted secondaryAccent hex>;
+        --text-primary: <exact extracted textColor hex>;
+        --text-muted: <exact extracted textMuted hex>;
+      }
+    • NEVER substitute or invent generic Tailwind colors (e.g. do NOT use #7c3aed or #a855f7 if the extracted brand accent is #8a3ffc)!
+    • THEME MODE MATCHING: If DARK MODE (e.g. Higgsfield, Imagine.art, Linear, Supabase, Vercel), build a dark-glass composition using the exact extracted dark background (--bg-primary) and dark surface cards (--bg-secondary). If LIGHT MODE (e.g. Stripe, Notion), build a clean light-glass composition.
+    • ACCENT ROLES: Bind --accent-primary to the extracted Primary Brand Accent for hero badges, active buttons, neon glowing orbs, and focus borders. Bind --accent-secondary for secondary chips and subtle gradient partners.
     • TYPOGRAPHY BINDING: Include the exact extracted typefaces via Google Fonts <link> inside index.html <head>!
     • LOGOS & ASSETS: Download the official brand logo from verified assets into assets/logo.svg!
 

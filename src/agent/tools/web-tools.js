@@ -284,13 +284,16 @@ function extractPalette(html) {
   const rankedChromatic = rank(chromatic);
   const rankedMonochrome = rank(monochrome);
 
-  // Require chromatic colors to come from authoritative branding sources (Meta, CSS Var, CTA) or recurring brand accents (count >= 6, score >= 20)
+  // Require chromatic colors to come from branding sources (Meta, CSS Var, CTA, SVG, Hex, Tailwind)
   const verifiedChromatic = rankedChromatic.filter(b => 
     b.sources.has('meta') || 
     b.sources.has('css-var') || 
     b.sources.has('cta') ||
-    ((b.sources.has('svg') || b.sources.has('hex') || b.sources.has('tailwind')) && b.count >= 6 && b.score >= 20)
+    b.sources.has('svg') ||
+    ((b.sources.has('hex') || b.sources.has('tailwind')) && (b.count >= 2 || b.score >= 5))
   );
+
+  const chromaticPool = verifiedChromatic.length > 0 ? verifiedChromatic : rankedChromatic;
 
   const sortMonochromeLuxury = (monos) => {
     const hexes = monos.map(m => m.hex.toLowerCase());
@@ -324,20 +327,19 @@ function extractPalette(html) {
   const totalChromaticScore = sumScores(chromatic);
   const totalMonochromeScore = sumScores(monochrome);
 
-  // If a site is 85%+ monochrome and has no explicit meta/css-var brand accent, it is a Luxury Monochrome brand (ElevenLabs, Apple, Vercel)
-  const hasAuthoritativeChromatic = rankedChromatic.some(b => b.sources.has('meta') || b.sources.has('css-var'));
-  const isDominantMonochrome = !hasAuthoritativeChromatic && (totalChromaticScore < 0.22 * totalMonochromeScore);
+  // If a site is 90%+ monochrome and has no chromatic accents anywhere, it is a Luxury Monochrome brand (ElevenLabs, Apple, Vercel)
+  const isDominantMonochrome = chromaticPool.length === 0 || (totalChromaticScore < 0.10 * totalMonochromeScore && !chromaticPool.some(b => b.sources.has('meta') || b.sources.has('css-var') || b.sources.has('cta')));
 
   let finalColors = [];
-  if (!isDominantMonochrome && verifiedChromatic.length >= 3) {
-    // Multi-color brand (e.g. Supabase, Stripe, Airbnb)
-    finalColors = verifiedChromatic.slice(0, 5).map(b => b.hex);
-  } else if (!isDominantMonochrome && verifiedChromatic.length > 0) {
+  if (!isDominantMonochrome && chromaticPool.length >= 3) {
+    // Multi-color brand (e.g. Supabase, Stripe, Imagine.art)
+    finalColors = chromaticPool.slice(0, 5).map(b => b.hex);
+  } else if (!isDominantMonochrome && chromaticPool.length > 0) {
     // Brand with 1 or 2 strong accents + signature dark/light neutrals
     const monoPicks = sortMonochromeLuxury(rankedMonochrome);
     finalColors = [
-      ...verifiedChromatic.map(b => b.hex),
-      ...monoPicks.slice(0, 5 - verifiedChromatic.length)
+      ...chromaticPool.map(b => b.hex),
+      ...monoPicks.slice(0, 5 - chromaticPool.length)
     ];
   } else {
     // Luxury monochrome brand (e.g. ElevenLabs, Apple, Vercel, Linear)
