@@ -42,16 +42,63 @@ const MAX_FOLLOWS = 2;       // per entry page, and only when it looked thin
 const MAX_ASSET_PROBES = 8;  // enough to find a real logo without stalling the plan
 
 /** Pages worth following when the entry page has almost no copy on it. */
-const FOLLOW_HINTS = /\/(about|about-us|product|products|features|pricing|solutions|company|why|platform)\/?$/i;
-
 export function extractUrls(text) {
   if (!text || typeof text !== 'string') return [];
-  const found = text.match(/https?:\/\/[^\s<>'")\]]+/gi) || [];
-  const cleaned = found.map(u => u.replace(/[.,;:!?)]+$/, ''));
-  return [...new Set(cleaned)].slice(0, MAX_URLS);
+  const urls = [];
+
+  // 1. Explicit http/https URLs
+  const explicit = text.match(/https?:\/\/[^\s<>'")\]]+/gi) || [];
+  for (const u of explicit) {
+    urls.push(u.replace(/[.,;:!?)]+$/, ''));
+  }
+
+  // 2. Bare domain matches (e.g. higgsfield.ai, elevenlabs.io, linear.app, imagine.art, stripe.com)
+  const bareDomains = text.match(/\b([a-zA-Z0-9-]+\.(?:com|ai|io|app|art|dev|co|org|net|xyz|so|me|design|tech))\b/gi) || [];
+  for (const d of bareDomains) {
+    const full = `https://${d.toLowerCase()}`;
+    if (!urls.some(u => u.toLowerCase().includes(d.toLowerCase()))) {
+      urls.push(full);
+    }
+  }
+
+  return [...new Set(urls)].slice(0, MAX_URLS);
 }
 
-/** True when the brief points at a website, so the caller can skip asking about colours. */
+/** Automatically searches for the official brand website if no URL or domain was typed. */
+export async function findBrandUrl(text, signal) {
+  if (!text || typeof text !== 'string') return null;
+  const clean = text
+    .replace(/\b(?:make|create|build|generate|explainer|video|animation|for|about|ka|ki|ke|ko|bnao|bna|do|please|motion|graphics|saas|dark|glass|ui|teal|lime|minimal|modern)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (clean.length < 2) return null;
+
+  try {
+    const queryUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(clean + ' official website')}`;
+    const res = await fetch(queryUrl, {
+      method: 'POST',
+      headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `q=${encodeURIComponent(clean + ' official website')}`,
+      signal: signal || AbortSignal.timeout(6000)
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const match = html.match(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"/i);
+    if (match) {
+      let href = match[1];
+      const wrapped = href.match(/[?&]uddg=([^&]+)/);
+      if (wrapped) href = decodeURIComponent(wrapped[1]);
+      if (href.startsWith('//')) href = 'https:' + href;
+      if (/^https?:\/\//i.test(href) && !href.includes('duckduckgo.com') && !href.includes('wikipedia.org') && !href.includes('youtube.com')) {
+        return href;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+/** True when the brief points at a website or names a discoverable brand. */
 export function hasUrl(text) {
   return extractUrls(text).length > 0;
 }
@@ -158,11 +205,15 @@ function followCandidates(html, baseUrl) {
  *          null when the brief has no links at all — the caller skips the whole step.
  */
 export async function researchBrief(text, opts = {}) {
-  const urls = extractUrls(text);
-  if (!urls.length) return null;
-
-  const emit = typeof opts.emit === 'function' ? opts.emit : () => {};
   const signal = opts.signal;
+  const emit = typeof opts.emit === 'function' ? opts.emit : () => {};
+
+  let urls = extractUrls(text);
+  if (!urls.length) {
+    const discovered = await findBrandUrl(text, signal);
+    if (discovered) urls = [discovered];
+  }
+  if (!urls.length) return null;
 
   const brands = [];
   const blocks = [];

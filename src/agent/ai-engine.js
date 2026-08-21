@@ -1383,7 +1383,7 @@ export async function planMotionGraphics(messages, options = {}) {
   let enrichedMessages = msgList;
   let research = options.research || null;
 
-  if (!alreadyResearched && lastUserIndex !== -1 && hasUrl(msgList[lastUserIndex].content)) {
+  if (!alreadyResearched && lastUserIndex !== -1) {
     if (!research) {
       try {
         research = await researchBrief(msgList[lastUserIndex].content, {
@@ -1998,7 +1998,7 @@ export async function generateMotionGraphics(messages, options = {}) {
       ...enriched[lastUserIndex],
       content: `${enriched[lastUserIndex].content}\n\n${existingResearch.block}`
     };
-  } else if (!existingResearch && !alreadyResearched && lastUserIndex !== -1 && hasUrl(messages[lastUserIndex].content)) {
+  } else if (!existingResearch && !alreadyResearched && lastUserIndex !== -1) {
     let research = null;
     try {
       research = await researchBrief(messages[lastUserIndex].content, {
