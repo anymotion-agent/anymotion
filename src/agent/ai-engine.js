@@ -7,6 +7,7 @@ import { researchBrief, hasUrl } from './research.js';
 import { skillSearchRoots, skillCatalogue, PRIMARY_SKILLS, listSkills, readSkill } from './skills.js';
 import { resetFileMemory } from './tools/fs-tools.js';
 import { runAgentLoop, resolveTokenPlan, resolveBaseUrl, withStallGuard, dropDanglingToolUse, prepareCachedRequest, fetchOpenAIAgentStream, inferProvider } from './agent-loop.js';
+import { THINKING_BUDGETS, THINKING_LEVELS, buildOpenAIThinkingParams, buildAnthropicThinkingParams, normalizeThinkingLevel } from './thinking-params.js';
 
 // ============================================================
 // SYSTEM PROMPTS — Motion Graphics AI Agent (SKILL-aware)
@@ -193,8 +194,10 @@ SECTION B — SCENE ARCHITECTURE & ELEMENT-LEVEL ANIMATION CONSISTENCY
     display: grid; grid-template-rows: auto 1fr auto; padding: 5% 7%; gap: 2rem;
 - Scene transitions use ONLY opacity + transform (translateY or scale). Never use display or visibility switching.
 - Minimum 3 scenes per animation. Each scene must have one distinct hero element as its focal point.
-- ELEMENT-LEVEL ANIMATION CONSISTENCY (CRITICAL):
-  • EVERY element in a scene (badge, title, subtitle, cards, icons, metrics, buttons) MUST be animated.
+- ELEMENT-LEVEL ANIMATION CONSISTENCY (CRITICAL - ANTI-SLIDESHOW RULE):
+  • DO NOT FADE IN THE ENTIRE SCENE AT ONCE. You MUST write individual tl.add() commands for EVERY SINGLE HTML element ([data-el]) inside the scene.
+  • A scene with 5 elements (e.g., title, subtitle, 3 cards) MUST have 5 separate elements animated in timeline.js with staggered delays.
+  • If you just fade in the .scene container and leave its contents static, it will look like a cheap slideshow and your code will be REJECTED.
   • Unified Easing Curve: Use cubic-bezier(0.16, 1, 0.3, 1) across ALL elements for smooth Apple-style spring entrance.
   • Staggered Offsets: Stagger sibling items with 60ms–80ms delay increments (e.g. t+0.0s title, t+0.08s subtitle, t+0.16s card 1, t+0.24s card 2).
   • Cohesive Direction: Elements in the same container move in shared spatial directions (e.g. translateY(24px -> 0px) or scale(0.95 -> 1.0)).
@@ -257,20 +260,11 @@ Rules:
 - Plain text only. No markdown headings, no bullets with asterisks.`;
 
 /**
- * Extended-thinking budgets in tokens. `off: 0` is listed explicitly so an intentional
- * "no thinking" survives the lookup as a real value instead of falling through a default
- * and being handed a budget back.
+ * Thinking levels and budgets live in thinking-params.js — the one module that knows
+ * every vendor's dialect. Re-exported here because bin/chat.js and other callers import
+ * them from the engine; they are also used below by the provider call paths.
  */
-export const THINKING_BUDGETS = {
-  off: 0,
-  low: 1024,
-  medium: 2048,
-  high: 4096,
-  xhigh: 8192,
-  max: 16384
-};
-
-export const THINKING_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+export { THINKING_LEVELS, THINKING_BUDGETS };
 
 /** Models offered by the /model picker. */
 export const AVAILABLE_MODELS = [
@@ -284,7 +278,7 @@ function translateOpenRouterModel(rawModel) {
   if (!rawModel) return 'anthropic/claude-3.7-sonnet';
   const m = String(rawModel).trim();
 
-  // If already contains a vendor prefix (e.g. "anthropic/claude-3.7-sonnet" or "openai/gpt-4o"), use directly
+  // If already contains a vendor prefix (e.g. "anthropic/claude-3.7-sonnet" or "google/gemini-2.0-flash-thinking-exp"), use directly
   if (m.includes('/')) return m;
 
   const lower = m.toLowerCase();
@@ -294,7 +288,12 @@ function translateOpenRouterModel(rawModel) {
   if (lower.includes('haiku')) return 'anthropic/claude-3.5-haiku';
   if (lower.includes('gpt-4o')) return 'openai/gpt-4o';
   if (lower.includes('gpt-5') || lower.includes('sol')) return 'openai/gpt-4.5-preview';
-  if (lower.includes('kimi')) return 'moonshotai/kimi-k3';
+  if (lower.includes('gemini')) return lower.includes('thinking') ? 'google/gemini-2.0-flash-thinking-exp:free' : 'google/gemini-2.5-pro';
+  if (lower.includes('qwq') || lower.includes('qwen')) return lower.includes('qwq') ? 'qwen/qwq-32b' : 'qwen/qwen-2.5-72b-instruct';
+  if (lower.includes('minimax')) return 'minimax/minimax-01';
+  if (lower.includes('kimi') || lower.includes('moonshot')) return 'moonshotai/kimi-k3';
+  if (lower.includes('deepseek') || lower.includes('r1')) return lower.includes('r1') ? 'deepseek/deepseek-r1' : 'deepseek/deepseek-chat';
+  if (lower.includes('glm')) return `zhipu/${m}`;
 
   return `anthropic/${m}`;
 }
@@ -345,12 +344,17 @@ async function callOpenAICompatible(prompt, config, opts = {}) {
     max_tokens: opts.maxTokens || 8192,
   };
 
-  if (opts.thinking && opts.thinking !== 'off') {
-    payload.include_reasoning = true;
-    payload.reasoning = { max_tokens: THINKING_BUDGETS[opts.thinking] || 4096 };
-  } else if (opts.thinking === 'off') {
-    payload.reasoning_effort = 'none';
-  }
+  // The old body sent include_reasoning + reasoning_effort + thinking + clear_thinking +
+  // reasoning to every OpenAI-compatible endpoint at once — a shotgun that half the
+  // vendors reject and the other half ignore, which is why the level the user picked
+  // changed nothing outside Anthropic. Now the dialect translator emits exactly the
+  // fields this provider understands, and 'off' is a real disable rather than a fallback
+  // that GLM's always-on default quietly overrode.
+  Object.assign(payload, buildOpenAIThinkingParams({
+    provider,
+    model,
+    level: opts.thinking ?? null
+  }).body);
 
   const headers = {
     'Content-Type': 'application/json',
@@ -376,7 +380,11 @@ async function callOpenAICompatible(prompt, config, opts = {}) {
     let accumulatedReasoning = '';
 
     try {
-      const response = await fetch(`${baseUrl}/chat/completions`, {
+      const requestUrl = (baseUrl.endsWith('/chat/completions') || baseUrl.endsWith('/responses'))
+        ? baseUrl
+        : `${baseUrl}/chat/completions`;
+
+      const response = await fetch(requestUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
@@ -489,7 +497,10 @@ async function callOpenAICompatible(prompt, config, opts = {}) {
         // Fallback: try non-streaming request if stream produced empty text
         try {
           const nonStreamPayload = { ...payload, stream: false };
-          const nsRes = await fetch(`${baseUrl}/chat/completions`, {
+          const requestUrl = (baseUrl.endsWith('/chat/completions') || baseUrl.endsWith('/responses'))
+            ? baseUrl
+            : `${baseUrl}/chat/completions`;
+          const nsRes = await fetch(requestUrl, {
             method: 'POST',
             headers,
             body: JSON.stringify(nonStreamPayload),
@@ -565,7 +576,11 @@ async function runOpenAIToolLoop({ prompt, config, opts, model }) {
             system: opts.system || SYSTEM_MOTION_GENERATE,
             messages,
             tools: opts.tools,
-            max_tokens: opts.maxTokens || 8192
+            max_tokens: opts.maxTokens || 8192,
+            // The abstract level, translated inside the fetch by the dialect map. The old
+            // call sent no effort knob at all, so intake and planning always reasoned at
+            // the model's own default no matter what /think said.
+            thinkingLevel: opts.thinking ?? null
           },
           config,
           opts.signal,
@@ -637,7 +652,7 @@ async function runOpenAIToolLoop({ prompt, config, opts, model }) {
 
 export async function callAIProvider(prompt, config, opts = {}) {
   const provider = inferProvider(config);
-  if (provider === 'anthropic' || provider === 'agentrouter') {
+  if (provider === 'anthropic' || provider === 'agentrouter' || provider === 'tabitoken') {
     return callClaudeAnthropic(prompt, config, opts);
   } else {
     return callOpenAICompatible(prompt, config, opts);
@@ -680,12 +695,17 @@ async function callClaudeAnthropic(prompt, config, opts = {}) {
   // `off` must survive as 0 rather than being defaulted back into a budget, and the
   // budget/max_tokens pair has to fit inside what this specific model can emit — a fixed
   // number here is what turns a model swap into a 400.
-  const requested = THINKING_BUDGETS[opts.thinking] ?? THINKING_BUDGETS.high;
+  const level = normalizeThinkingLevel(opts.thinking ?? config.thinking, 'high');
+  const requested = THINKING_BUDGETS[level] ?? THINKING_BUDGETS.high;
   const plan = resolveTokenPlan(model, requested, msgParams.max_tokens);
   msgParams.max_tokens = plan.maxTokens;
 
-  if (plan.budget) {
-    msgParams.thinking = { type: 'enabled', budget_tokens: plan.budget };
+  // GLM on the Anthropic-shaped endpoint is a toggle, not a budget — the translator
+  // handles that; Claude itself gets the SDK's standard shape. Null means no thinking
+  // field at all, which is what 'off' asks for.
+  const thinkingParams = buildAnthropicThinkingParams(model, level, plan.budget);
+  if (thinkingParams) {
+    msgParams.thinking = thinkingParams;
   }
 
   /**
@@ -1617,6 +1637,18 @@ NARRATE. This matters as much as the code.
   Mirror the user's language exactly. Roman Urdu in, Roman Urdu out. English in,
   English out. Do not switch on them.
 
+IMMEDIATE EXECUTION ON APPROVAL (ZERO CHAT-ONLY TURNS & ZERO DISCOVERY CALLS):
+  - When the plan is approved, DO NOT output standalone conversational prose or lengthy explanations without tool calls.
+  - DO NOT call discovery tools (like list_dir or grep_files) on a newly created empty project folder — you already know the directory is empty.
+  - In your VERY FIRST TURN after approval, you MUST start writing files immediately — write_file for index.html FIRST
+    (its result returns the NAMING CONTRACT: every id/class now on disk), then write_file for style.css in the same turn.
+  - Never end a turn with conversational promises like "I will now start building" — CALL the tools directly!
+
+RAPID VECTOR & SHAPE GENERATION (NO MANUAL BEZIER MATH IN THINKING):
+  - NEVER manually compute raw SVG bezier polynomial coordinates (e.g. C x1 y1 x2 y2 x y) or multi-point spline math in thinking tokens — this burns thousands of reasoning tokens and wastes 10+ minutes.
+  - Use clean standard SVG geometry, semantic shapes (<circle>, <rect>, <path>), or CSS clip-path / border-radius / scale transforms.
+  - For shape morphing, animate CSS border-radius (e.g. 50% to 12px), CSS clip-path polygons, or cross-fade transforms rather than calculating raw path point deltas.
+
 PLAN OUT LOUD.
   For anything with more than one step, call update_todos first, then call it again
   every time a step lands — mark that one done and the next one active in the same
@@ -1640,13 +1672,39 @@ NEVER EDIT BLIND — BUT DO NOT RE-READ WHAT YOU ALREADY HAVE.
   away work the user may have done in the editor, and burns tokens reproducing code
   that was already correct.
 
-FAST 1-SHOT MODULAR FILE CREATION:
-  - Deliver clean, modular, production-ready files in a single pass:
-    • index.html (Complete HTML DOM structure, semantic scenes with data-scene="<n>", data-layer attributes, linked to style.css & timeline.js)
-    • style.css (Complete CSS layout, glassmorphism tokens, presets, typography, responsive stage)
-    • timeline.js (Complete deterministic animation engine, window.seek(t), window.DURATION, scene transitions, cursor motion, and audio synth)
-  - FAST COMPLETE WRITES: Write each file COMPLETELY from start to finish in a single write_file call. Do NOT break a file into small 50-line fragments or multi-turn appends — output the complete working file.
-  - BATCH TOOL CALLS: You can emit write_file for index.html, style.css, and timeline.js in the SAME response turn to construct the entire project in 1-2 rapid turns instead of wasting 10+ turns.
+INTELLIGENT MODULAR ARCHITECTURE (PREVENTS MONOLITHIC BUGS & TOKEN OVERFLOW):
+  - Splitting code into clean, modular files prevents token exhaustion, truncated outputs, and syntax errors:
+    • index.html (Semantic HTML markup, viewport, Google fonts, CSS/JS links, and <section class="scene" data-scene="N"> containers. Keep under 200 lines).
+    • style.css (All CSS design tokens, Glassmorphism, card grids, typography, badges, glow effects. Keep under 300 lines).
+    • timeline.js (Animation engine, deterministic window.seek(t), window.DURATION, modular scene renderers, audio dispatcher. Keep under 400 lines).
+  - MODULAR SCENE RENDERERS IN TIMELINE.JS:
+    • Break timeline.js into isolated modular scene functions:
+      function renderScene1(t, state) { ... }
+      function renderScene2(t, state) { ... }
+      function renderScene3(t, state) { ... }
+      function renderScene4(t, state) { ... }
+      function renderScene5(t, state) { ... }
+      function renderScene6(t, state) { ... }
+    • Inside window.seek(t), dispatch to each scene based on its computed visibility state:
+      if (s1.visible) renderScene1(sec, s1);
+      if (s2.visible) renderScene2(sec, s2);
+      ...
+    • This guarantees strict variable scope isolation. Scene 1's variables never collide with Scene 2, eliminating state leak bugs!
+  - STAGED CONSTRUCTION (BIG FILES ARE WRITTEN IN PARTS, NEVER IN ONE SHOT):
+    • Turn 1: write_file index.html — complete structure with EVERY id and class (this
+      file IS the naming contract). Then write_file style.css in the same turn.
+    • Turn 2: write_file the timeline.js SKELETON only — top constants, DOM lookups
+      copied verbatim from the NAMING CONTRACT returned by the index.html write,
+      window.DURATION, the window.seek(t) dispatcher, and empty scene-function stubs:
+        function renderScene1(t, s) {
+          /* FILL: SCENE 1 */
+        }
+    • Then fill ONE scene per edit_file call, replacing each stub with its real body.
+      Keep each edit under ~80 lines. A large file assembled from small verified parts
+      has exact ids (they were in your context seconds ago, not 20k tokens ago), cannot
+      be truncated into syntax errors, and a bad section never corrupts the whole file.
+    • Same rule for ANY file past ~150 lines: write the skeleton with section-marker
+      comments, then grow it with edit_file one section at a time.
   - Assets: Put media (images, audio, videos, SVG) in an \`assets/\` folder.
 
 ZERO-BUG FIRST-PASS ARCHITECTURE STANDARDS (PREVENT BUGS BEFORE THEY HAPPEN):
@@ -1686,10 +1744,18 @@ ZERO-BUG FIRST-PASS ARCHITECTURE STANDARDS (PREVENT BUGS BEFORE THEY HAPPEN):
        const clamp01 = (v) => Math.max(0, Math.min(1, v));
        const cubicBezier = (p) => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
 
-  3. 1920×1080 STAGE BOUNDS (ZERO OFF-CANVAS / OVERFLOW):
-     - Set stage strictly: .stage { width: 1920px; height: 1080px; position: relative; overflow: hidden; }
-     - Keep content centered within an inner container: max-width: 1560px; margin: 0 auto;
-     - Cards and features must use flexbox/grid with explicit gap (e.g. gap: 32px) rather than arbitrary top/left coordinates.
+  3. 1920×1080 STAGE BOUNDS & RESPONSIVE AUTO-SCALING (PERFECT SCREEN CENTERING):
+     - #viewport { position: fixed; inset: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #000; }
+     - #stage { width: 1920px; height: 1080px; position: relative; overflow: hidden; background: var(--bg-primary, #000); transform-origin: center center; transform: scale(var(--stage-scale, 1)); flex-shrink: 0; }
+     - timeline.js must ALWAYS include the responsive auto-fit scaler:
+       function fitStage() {
+         var vw = window.innerWidth || 1920, vh = window.innerHeight || 1080;
+         var scale = Math.min(vw / 1920, vh / 1080);
+         document.documentElement.style.setProperty('--stage-scale', scale);
+       }
+       window.addEventListener('resize', fitStage);
+       fitStage();
+     - Content bounds: max-width: 1560px; margin: 0 auto; Cards/features must use flexbox/grid with explicit gap.
 
   4. MANDATORY WINDOW CONTRACTS & INTERACTIVE PLAYBACK ENGINE:
      - Always declare \`window.DURATION = <seconds>;\` at the top of timeline.js.
@@ -1722,16 +1788,42 @@ ZERO-BUG FIRST-PASS ARCHITECTURE STANDARDS (PREVENT BUGS BEFORE THEY HAPPEN):
      - Never call \`audio.play()\` directly inside \`seek(t)\`!
      - Gate audio playback inside \`window.playCuesFor(t, isPlaying)\` so headless auditing and video rendering remain 100% silent and error-free.
 
-HIGH-PRECISION SURGICAL BUG FIXING:
-  - Run check_composition and validate_seek to audit your build.
-  - If check_composition or validate_seek reports any errors or warnings (e.g. OVERLAP, console errors, missing seek, or layer bounds):
-    • Identify the exact file and lines causing the issue.
-    • Fix it SURGICALLY with a single targeted edit_file call (including 2-4 lines of surrounding context for 100% exact match).
-    • DO NOT rewrite the entire file with write_file when fixing a bug — use edit_file to preserve working code and save tokens.
-    • Immediately re-run check_composition to confirm the fix is 100% clean.
-  - Then call preview_frames with one timestamp per scene and inspect the rendered visual output. Check that text is not overlapping or clipped, contrast is readable, and Liquid Glass layout looks polished. If anything looks wrong, fix it surgically with edit_file and verify again.
-  - Self-critique before finishing: Does this look like a broadcast-quality SaaS product explainer? Is the brand palette clearly visible (covering at least 15-20% of non-background elements)?
-  - Never tell the user the work is done before check_composition and validate_seek come back completely clean.
+  6. 100% CANONICAL ID/CLASS CONTRACT & NULL-SAFE ELEMENT QUERIES (ZERO MISMATCH CRASHES):
+     - STRICT 1-TO-1 MATCHING: When writing timeline.js or style.css, match the EXACT id and class names declared in index.html (e.g. if index.html has id="play-btn", never query document.getElementById('playbtn')).
+     - SAFE NULL-GUARDING: Always use optional chaining or null guards when querying DOM elements:
+       const playBtn = document.getElementById('play-btn') || document.getElementById('playbtn');
+       playBtn?.addEventListener('click', togglePlay);
+       const cursor = document.getElementById('cursor');
+       if (cursor) cursor.style.transform = \`translate3d(\${cx}px, \${cy}px, 0)\`;
+     - This guarantees timeline.js NEVER throws "Cannot read properties of null (reading 'style')" runtime exceptions!
+
+  7. MANDATORY INTERACTIVE PLAYBACK CONTROLS:
+     - index.html must ALWAYS include the interactive preview playback controls at the bottom before </body>:
+       <div class="playback" id="playback">
+         <button id="playbtn" title="Play / Pause (Space)" aria-label="Play / Pause">&#9654;</button>
+         <div class="tc" id="tc">00:00 / 00:25</div>
+       </div>
+     - style.css must include .playback (fixed right: 24px, bottom: 24px, glassmorphic button with brand accent glow) and .playback .tc monospace timecode.
+
+HIGH-PRECISION RAPID BUG-SOLVING PROTOCOL (SOLVE ANY DEFECT IN 1-2 TURNS):
+  Whenever the user reports a bug, defect, missing element, audio glitch, overlap, or broken animation:
+  1. TRIANGULATE ACROSS FILES (CALL DIAGNOSE_ISSUE OR GREP_FILES):
+     - Immediately call \`diagnose_issue(symptom, target)\` or grep across \`index.html\`, \`style.css\`, and \`timeline.js\`.
+     - Compare the 3 layers in parallel:
+       • Structure (index.html): Does the HTML container or tag exist? What ID/classes are assigned?
+       • Styling (style.css): Are there styles for it? Is it hidden by opacity: 0, display: none, or off-canvas?
+       • Logic (timeline.js): Is it queried in DOM? Are event listeners attached? Is seek(t) updating its state?
+  2. PINPOINT THE SINGLE BROKEN LINK:
+     - Check the 3 common root causes:
+       a. Structure Missing: The feature is coded in JS and styled in CSS, but the HTML container markup was omitted.
+       b. Contract Mismatch: HTML has \`id="play-btn"\`, but JS queries \`getElementById('playbtn')\`.
+       c. State / Scene Masking: The element sits inside a scene container that is inactive/hidden at the given timestamp.
+  3. SURGICAL MINIMAL PATCH WITH EDIT_FILE:
+     - Apply a targeted, surgical diff with \`edit_file\` (including 2-4 lines of exact surrounding context).
+     - NEVER rewrite the entire file with \`write_file\` when fixing a bug — this wastes thousands of tokens and risks regressions.
+  4. VERIFY IMMEDIATELY WITH CHECK_COMPOSITION & PREVIEW_FRAMES:
+     - Immediately re-run \`check_composition\` and \`preview_frames\` at the target timestamp to confirm the fix is 100% clean.
+     - Never claim a bug is fixed without automated verification.
 
 SCENE PACING & TIMING STANDARDS:
   - Title / Intro scene: 3.5–4 seconds (gives viewers time to absorb brand and topic).

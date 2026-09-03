@@ -110,15 +110,21 @@ async function getText(url, signal) {
     signal: signal || AbortSignal.timeout(PAGE_TIMEOUT)
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  let html = await res.text();
+  const html = await res.text();
+  let rawCss = '';
 
   // Modern websites define their brand colors in external CSS (Tailwind, Webpack bundles, etc).
-  // Fetching the first few stylesheets and appending them gives extractPalette the CSS it needs.
+  // Fetching the first few stylesheets gives extractPalette the CSS it needs.
   try {
-    const cssLinks = [...html.matchAll(/<link[^>]+rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/gi)].map(m => m[1]);
+    const linkMatches = [
+      ...html.matchAll(/<link[^>]+(?:href=["']([^"']+)["'][^>]+rel=["']stylesheet["']|rel=["']stylesheet["'][^>]+href=["']([^"']+)["'])[^>]*>/gi)
+    ];
     const cssUrls = [];
-    for (const link of cssLinks) {
-      try { cssUrls.push(new URL(link, url).href); } catch (_) {}
+    for (const m of linkMatches) {
+      const link = m[1] || m[2];
+      if (link) {
+        try { cssUrls.push(new URL(link, url).href); } catch (_) {}
+      }
     }
     for (const cssUrl of cssUrls.slice(0, 3)) {
       if (signal?.aborted) break;
@@ -127,12 +133,12 @@ async function getText(url, signal) {
           headers: { 'User-Agent': UA },
           signal: signal || AbortSignal.timeout(3000)
         });
-        if (cssRes.ok) html += '\n<style>\n' + (await cssRes.text()) + '\n</style>\n';
+        if (cssRes.ok) rawCss += '\n' + (await cssRes.text());
       } catch (_) {}
     }
   } catch (_) {}
 
-  return html;
+  return { html, rawCss };
 }
 
 /**
@@ -225,16 +231,18 @@ export async function researchBrief(text, opts = {}) {
     if (signal?.aborted) break;
 
     emit({ type: 'fetch', url });
-    let html;
+    let html, rawCss;
     try {
-      html = await getText(url, signal);
+      const pageData = await getText(url, signal);
+      html = pageData.html;
+      rawCss = pageData.rawCss;
     } catch (err) {
       failures.push({ url, why: err.message });
       emit({ type: 'fail', url, detail: err.message });
       continue;
     }
 
-    const brand = extractBrand(html, url);
+    const brand = extractBrand(html, url, rawCss);
     brands.push(brand);
     blocks.push(formatBrand(brand, url));
     emit({
@@ -252,7 +260,8 @@ export async function researchBrief(text, opts = {}) {
         if (signal?.aborted) break;
         emit({ type: 'fetch', url: next });
         try {
-          const sub = extractBrand(await getText(next, signal), next);
+          const subData = await getText(next, signal);
+          const sub = extractBrand(subData.html, next, subData.rawCss);
           brands.push(sub);
           blocks.push(formatBrand(sub, next));
           emit({ type: 'page', url: next, brand: sub, detail: `${sub.copy.length} copy blocks` });

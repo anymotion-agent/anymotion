@@ -40,6 +40,7 @@ export const PROVIDERS = [
   { id: 'opencode-zen', label: 'OpenCode Zen', env: 'ANYMOTION_API_KEY', endpoint: 'https://opencode.ai/zen/v1', defaultModel: 'deepseek-v4-flash-free' },
   { id: 'opencode-go', label: 'OpenCode Go', env: 'ANYMOTION_API_KEY', endpoint: 'https://opencode.ai/zen/go/v1', defaultModel: 'deepseek-v4-flash-free' },
   { id: 'tokenrouter', label: 'TokenRouter', env: 'TOKENROUTER_API_KEY', endpoint: 'https://api.tokenrouter.com/v1', defaultModel: 'gpt-4o' },
+  { id: 'tabitoken', label: 'TabiToken', env: 'TABITOKEN_API_KEY', endpoint: 'https://tabitoken.com', defaultModel: 'claude-opus-5' },
   { id: 'openai', label: 'OpenAI', env: 'OPENAI_API_KEY', endpoint: 'https://api.openai.com/v1', defaultModel: 'gpt-4o' },
   { id: 'groq', label: 'Groq', env: 'GROQ_API_KEY', endpoint: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
   { id: 'deepseek', label: 'DeepSeek', env: 'DEEPSEEK_API_KEY', endpoint: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat' },

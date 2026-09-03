@@ -1482,6 +1482,23 @@ async function doBuild(tui, state, prompt, plan, option, opts = {}) {
     tui.action('open', displayPath(project.dir), 'editing in place');
   } else {
     tui.action('mkdir', displayPath(project.dir), 'project workspace');
+    tui.action('note', 'Folder created', 'you can drop custom assets before proceeding');
+    
+    const ask = makeQuestionAsker(tui, state);
+    const answer = await ask({
+      question: `Add custom assets to ${displayPath(project.dir)}?`,
+      context: 'You can drop images, logos, fonts, or videos into the folder now.',
+      options: [
+        { label: 'Assets added (I have placed them in the folder)', description: '' },
+        { label: 'Not needed (Proceed without custom assets)', description: '' }
+      ],
+      allowCustom: false
+    });
+
+    if (answer && !answer.cancelled && answer.text && answer.text.includes('Assets added')) {
+      tui.action('note', 'Custom assets confirmed', 'agent will use them');
+      prompt += '\n\nNote: The user has placed custom assets (images, logos, fonts, videos) in the project folder. Please use them where appropriate in the explainer.';
+    }
   }
   tui.action('skill', 'saas-explainer-motion', 'Liquid Glass UI · 60fps Motion Engine · Web Audio (Active)');
   tui.text(revising ? `Revising: ${option.title}` : `Building: ${option.title}`, c.white);
@@ -1787,6 +1804,7 @@ function chooseThinking(tui, state, arg) {
     return;
   }
   const notes = {
+    off: 'no reasoning — fastest, direct answers',
     low: 'quick reasoning — fast response',
     medium: 'balanced reasoning',
     high: 'deep reasoning — default',

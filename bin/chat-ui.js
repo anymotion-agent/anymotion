@@ -331,7 +331,7 @@ export class Tui {
 
   action(verb, target, note = '') {
     this.push(
-      c.dim('  ' + RAIL + ' ') + c.accent(String(verb).padEnd(8)) +
+      c.dim('  ' + RAIL + ' ') + c.accent(String(verb).padEnd(10)) + ' ' +
       c.white(target) + (note ? c.dim('  ' + note) : '')
     );
   }

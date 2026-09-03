@@ -31,7 +31,7 @@
     "serve": "node bin/motion-cli.js serve",
     "projects": "node bin/motion-cli.js projects",
     "agent": "node bin/motion-cli.js generate --serve",
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.js\""
   },
   "keywords": [
     "motion-graphics",

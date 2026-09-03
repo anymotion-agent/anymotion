@@ -13,6 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { resolveInProject, assertWritable, ensureDir } from '../sandbox.js';
+import { repairAndReport, manifestOf } from './contract-audit.js';
 
 const MAX_READ_BYTES = 2_000_000;
 const DEFAULT_READ_LIMIT = 3000;
@@ -112,11 +113,58 @@ function walk(dir, projectDir, out = [], depth = 0) {
   return out;
 }
 
-/** Validates and heals common syntax errors before writing to disk. */
+/**
+ * Compiles a simple glob ("*.css", "assets/*.js", "assets/**.json") to a RegExp matched
+ * against project-relative paths. `*` stays within one path segment; `**` crosses them.
+ */
+function globToRegex(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') { re += '.*'; i++; }
+      else re += '[^/]*';
+    } else if (c === '?') {
+      re += '[^/]';
+    } else {
+      re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp('^' + re + '$');
+}
+
+/** True when `text` parses as a complete JavaScript program. */
+function parsesClean(text) {
+  try {
+    // new Function compiles the body as a program — a SyntaxError here is the same
+    // one node --check would report, and it costs a few ms with no child process.
+    new Function(text);
+    return true;
+  } catch (e) {
+    if (e instanceof SyntaxError) return false;
+    throw e;
+  }
+}
+
+/**
+ * Validates and heals common syntax errors before writing to disk.
+ *
+ * JS healing is parse-first: if the content already parses, NOTHING is appended. The
+ * old version counted raw {/(/[ characters — including the ones inside strings,
+ * comments and regex literals — so any file with a "{" inside a string literal got
+ * garbage closers bolted on the end, and the model then spent turns debugging
+ * corruption it did not cause. Bracket math runs only on content that provably fails
+ * to parse, and only when the imbalance is small.
+ *
+ * Returns { content, issues } — `issues` are human/model-readable warnings that the
+ * caller appends to the tool result, so a file that still does not parse is flagged in
+ * the same turn it was written, not three debug cycles later.
+ */
 function validateAndHealSyntax(filePath, content) {
-  if (typeof content !== 'string') return content;
+  if (typeof content !== 'string') return { content, issues: [] };
   const ext = path.extname(filePath).toLowerCase();
   let healed = content;
+  const issues = [];
 
   if (ext === '.json') {
     try {
@@ -131,21 +179,142 @@ function validateAndHealSyntax(filePath, content) {
       }
     }
   } else if (ext === '.js') {
-    // Basic balanced brackets check & auto-close for JavaScript
+    // 1. Unclosed template literal (odd count of unescaped backticks) — still worth
+    //    fixing before a parse, because the parse would only say "unexpected end".
+    const backticks = (healed.match(/(?<!\\)`/g) || []).length;
+    if (backticks % 2 !== 0) {
+      healed += '`';
+    }
+
+    // 2. Bracket healing, but ONLY when the file does not already parse. A file that
+    //    parses is correct by definition; the counts below would still see "extra"
+    //    brackets inside string literals and corrupt a working file.
+    if (!parsesClean(healed)) {
+      const before = healed;
+      let openB = (healed.match(/{/g) || []).length;
+      let closeB = (healed.match(/}/g) || []).length;
+      let openP = (healed.match(/\(/g) || []).length;
+      let closeP = (healed.match(/\)/g) || []).length;
+      let openBr = (healed.match(/\[/g) || []).length;
+      let closeBr = (healed.match(/\]/g) || []).length;
+
+      if (openBr > closeBr && openBr - closeBr <= 10) {
+        healed += '\n' + ']'.repeat(openBr - closeBr);
+      }
+      if (openP > closeP && openP - closeP <= 10) {
+        healed += '\n' + ')'.repeat(openP - closeP);
+      }
+      if (openB > closeB && openB - closeB <= 10) {
+        healed += '\n' + '}'.repeat(openB - closeB);
+      }
+
+      // If appending closers did not rescue the parse, it made things worse — a file
+      // that fails with a clearer error beats a file that fails AND has junk on the end.
+      if (healed !== before && !parsesClean(healed)) {
+        healed = before;
+      }
+    }
+
+    // 3. Still unparseable after healing: write it anyway (the model may be mid-refactor
+    //    and editing another file first), but say so loudly so the next turn fixes it
+    //    instead of the failure surfacing later as a mysterious runtime bug.
+    if (!parsesClean(healed)) {
+      try {
+        new Function(healed);
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          issues.push(
+            `⚠ ${path.basename(filePath)} has a SYNTAX ERROR: ${e.message}. ` +
+            `Fix it with edit_file before building anything else on top of it.`
+          );
+        }
+      }
+    }
+
+    // 4. Auto-ensure responsive fitStage scaler exists in timeline.js
+    if (path.basename(filePath).toLowerCase() === 'timeline.js' && !healed.includes('fitStage') && !healed.includes('stage-scale')) {
+      const fitStageSnippet = `\n/* Auto-scale 1920x1080 stage to fit any screen resolution */\nfunction fitStage() {\n  var vw = window.innerWidth || 1920, vh = window.innerHeight || 1080;\n  var s = Math.min(vw / 1920, vh / 1080);\n  document.documentElement.style.setProperty('--stage-scale', s);\n}\nwindow.addEventListener('resize', fitStage);\nfitStage();\n`;
+      healed = fitStageSnippet + healed;
+    }
+  } else if (ext === '.html') {
+    // 1. Auto-heal unclosed <script> tag if script was cut off
+    const openScripts = (healed.match(/<script\b[^>]*>/gi) || []).length;
+    const closeScripts = (healed.match(/<\/script>/gi) || []).length;
+    if (openScripts > closeScripts) {
+      let openB = (healed.match(/{/g) || []).length;
+      let closeB = (healed.match(/}/g) || []).length;
+      if (openB > closeB && openB - closeB <= 10) {
+        healed += '\n' + '}'.repeat(openB - closeB);
+      }
+      healed += '\n</script>';
+    }
+
+    // 2. Auto-heal unclosed <style> tag
+    const openStyles = (healed.match(/<style\b[^>]*>/gi) || []).length;
+    const closeStyles = (healed.match(/<\/style>/gi) || []).length;
+    if (openStyles > closeStyles) {
+      healed += '\n</style>';
+    }
+
+    // 3. Ensure closing body and html tags if missing
+    if (healed.includes('<body') && !healed.includes('</body>')) {
+      healed += '\n</body>';
+    }
+    if (healed.includes('<html') && !healed.includes('</html>')) {
+      healed += '\n</html>';
+    }
+
+    // 4. Auto-ensure playback controls container exists for explainer projects
+    if (healed.includes('timeline.js') && !healed.includes('id="playbtn"') && !healed.includes("id='playbtn'")) {
+      const playbackMarkup = `\n  <!-- ============ PLAYBACK CONTROLS (interactive preview) ============ -->\n  <div class="playback" id="playback">\n    <button id="playbtn" title="Play / Pause (Space)" aria-label="Play / Pause">&#9654;</button>\n    <div class="tc" id="tc">00:00 / 00:25</div>\n  </div>\n`;
+      if (healed.includes('</div><!-- /viewport -->')) {
+        healed = healed.replace('</div><!-- /viewport -->', '</div><!-- /viewport -->' + playbackMarkup);
+      } else if (healed.includes('</body>')) {
+        healed = healed.replace('</body>', playbackMarkup + '</body>');
+      } else {
+        healed += playbackMarkup;
+      }
+    }
+  } else if (ext === '.css') {
+    // Auto-heal unclosed CSS rules
     let openB = (healed.match(/{/g) || []).length;
     let closeB = (healed.match(/}/g) || []).length;
-    let openP = (healed.match(/\(/g) || []).length;
-    let closeP = (healed.match(/\)/g) || []).length;
-
-    if (openB > closeB && openB - closeB <= 5) {
+    if (openB > closeB && openB - closeB <= 10) {
       healed += '\n' + '}'.repeat(openB - closeB);
-    }
-    if (openP > closeP && openP - closeP <= 5) {
-      healed += '\n' + ')'.repeat(openP - closeP);
     }
   }
 
-  return healed;
+  return { content: healed, issues };
+}
+
+/**
+ * Write-time feedback for a just-written file — the heart of the mismatch fix.
+ *
+ * For a JS write (or an HTML write against existing JS):
+ *   1. unambiguous near-miss references (play-btn vs playbtn) are auto-corrected in
+ *      the JS to match the HTML, and
+ *   2. whatever cannot be auto-fixed is reported with file:line and the correction,
+ *      so the model fixes it in the same run instead of three debug turns later.
+ *
+ * For an HTML write, the result also carries the NAMING MANIFEST — the exact
+ * ids/classes now on disk — because a big HTML file is exactly where the model's
+ * next timeline.js gets its near-miss ids from.
+ *
+ * `rewritten` maps any JS file the repair changed to its new content, so the caller
+ * re-stamps its file-memory with the bytes that are actually on disk now. Empty when
+ * the counterpart file does not exist yet (a first-turn build is not a mismatch).
+ */
+function crossFileFeedback(relPath, projectDir, { manifest = false } = {}) {
+  const ext = path.extname(relPath).toLowerCase();
+  if (ext !== '.js' && ext !== '.html') {
+    return { text: '', manifest: '', rewritten: new Map() };
+  }
+  const entry = ext === '.html' ? path.basename(relPath) : 'index.html';
+  const { report, rewritten } = repairAndReport(projectDir, entry);
+  const manifestText = manifest && ext === '.html'
+    ? manifestOf(path.join(projectDir, path.basename(relPath)))
+    : '';
+  return { text: report, manifest: manifestText, rewritten };
 }
 
 export const fsTools = [
@@ -259,13 +428,17 @@ export const fsTools = [
     name: 'grep_files',
     description:
       'Search the project files with a regular expression. Returns matching lines with their file and line number. ' +
-      'Use this to locate a selector, an element id, or a keyframe without reading whole files.',
+      'Use this to locate a selector, an element id, or a keyframe without reading whole files. ' +
+      'Pass context to also show lines around each match — the usual way to see enough of a function or CSS rule ' +
+      'to edit it without a separate read_file.',
     input_schema: {
       type: 'object',
       properties: {
         pattern: { type: 'string', description: 'JavaScript regular expression source, e.g. "@keyframes\\\\s+\\\\w+"' },
         path: { type: 'string', description: 'Limit the search to this file or folder. Omit to search the whole project.' },
-        ignore_case: { type: 'boolean' }
+        glob: { type: 'string', description: 'Only search files matching this pattern, e.g. "*.css" or "assets/*.js".' },
+        ignore_case: { type: 'boolean' },
+        context: { type: 'number', description: 'Lines of context to show before and after each match, 0–10.' }
       },
       required: ['pattern']
     },
@@ -277,20 +450,39 @@ export const fsTools = [
         throw new Error(`Invalid regular expression: ${err.message}`);
       }
 
+      const contextLines = Math.max(0, Math.min(10, input.context | 0));
+      const globRe = input.glob ? globToRegex(input.glob) : null;
+
       const root = input.path ? resolveInProject(ctx.project.dir, input.path) : ctx.project.dir;
       const files = fs.existsSync(root) && fs.statSync(root).isFile()
         ? [{ path: relative(ctx.project.dir, root), dir: false }]
         : walk(root, ctx.project.dir).filter(e => !e.dir);
 
       const hits = [];
+      const MAX_HITS = 100;
       for (const file of files) {
+        if (globRe && !globRe.test(file.path)) continue;
         const abs = path.join(ctx.project.dir, file.path);
         let text;
         try { text = fs.readFileSync(abs, 'utf-8'); } catch (_) { continue; }
-        text.split('\n').forEach((line, i) => {
-          if (hits.length >= 100) return;
-          if (re.test(line)) hits.push(`${file.path}:${i + 1}: ${line.trim().slice(0, 200)}`);
-        });
+        const lines = text.split('\n');
+
+        for (let i = 0; i < lines.length; i++) {
+          if (hits.length >= MAX_HITS) break;
+          if (!re.test(lines[i])) continue;
+          if (contextLines > 0) {
+            const from = Math.max(0, i - contextLines);
+            const to = Math.min(lines.length - 1, i + contextLines);
+            const block = [];
+            for (let j = from; j <= to; j++) {
+              block.push((j === i ? '>' : ' ') + `${file.path}:${j + 1}: ${lines[j].trim().slice(0, 200)}`);
+            }
+            hits.push(block.join('\n'));
+          } else {
+            hits.push(`${file.path}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+          }
+        }
+        if (hits.length >= MAX_HITS) break;
       }
 
       return {
@@ -308,7 +500,12 @@ export const fsTools = [
     name: 'write_file',
     description:
       'Create a file, or replace one entirely. Use this for new files only. ' +
-      'To change part of a file that already exists, use edit_file — a full rewrite loses work and burns tokens.',
+      'To change part of a file that already exists, use edit_file — a full rewrite loses work and burns tokens. ' +
+      'After an HTML write the result lists the NAMING CONTRACT (every id/class now on disk) — copy those names ' +
+      'verbatim into the JavaScript and CSS, dashes and underscores included. After a JS write the result ' +
+      'auto-corrects any near-miss id/class references to the HTML and reports anything it could not fix; ' +
+      'resolve reported mismatches with edit_file before writing further files — they are exactly the bugs that ' +
+      'otherwise only appear when the composition runs.',
     input_schema: {
       type: 'object',
       properties: {
@@ -336,21 +533,45 @@ export const fsTools = [
       const target = assertWritable(ctx.project.dir, input.path);
       const existed = fs.existsSync(target);
       ensureDir(target);
-      const finalContent = validateAndHealSyntax(input.path, input.content);
+      const { content: finalContent, issues } = validateAndHealSyntax(input.path, input.content);
       fs.writeFileSync(target, finalContent, 'utf-8');
+
+      // Repair may rewrite this very file (JS) or its siblings — the memory cache must
+      // end up holding the bytes that are on disk, not the bytes the model sent.
+      const feedback = crossFileFeedback(input.path, ctx.project.dir, { manifest: true });
+      const onDisk = feedback.rewritten.get(path.basename(input.path)) ?? finalContent;
+
       // The model composed these bytes, so it already knows them — recording that here means
       // a read_file straight after a write returns "unchanged" instead of echoing back the
       // content the model just sent. That echo was a full duplicate of the write, at input
       // prices, for no new information.
-      remember(target, finalContent, { full: true });
+      remember(target, onDisk, { full: true });
+
+      const parts = [
+        ...issues,
+        feedback.manifest,
+        feedback.text
+      ].filter(Boolean);
+
+      // Large first writes are exactly where near-miss ids and truncated outputs come
+      // from. The system prompt says to build in stages; this is the reminder that
+      // lands at the moment it matters, when it was not followed.
+      if (!existed && countLines(onDisk) > 300) {
+        parts.push(
+          `\n💡 ${countLines(onDisk)} lines in one write — that is where id typos and truncation creep in. ` +
+          `Next time: write the skeleton with section markers, then grow it with edit_file one section at a time. ` +
+          `If you fill scene bodies from here, do it as separate edit_file calls per scene.`
+        );
+      }
+
       return {
-        content: `${existed ? 'Overwrote' : 'Created'} ${input.path} (${countLines(finalContent)} lines).`,
+        content: `${existed ? 'Overwrote' : 'Created'} ${input.path} (${countLines(onDisk)} lines).` + parts.join('\n'),
         meta: {
-          added: countLines(finalContent),
+          added: countLines(onDisk),
           removed: 0,
           path: input.path,
           existed,
-          preview: finalContent.split('\n').slice(0, 14).join('\n')
+          preview: onDisk.split('\n').slice(0, 14).join('\n')
         }
       };
     },
@@ -489,13 +710,18 @@ export const fsTools = [
         ? original.split(input.old_string).join(input.new_string)
         : original.replace(input.old_string, input.new_string);
 
-      const finalContent = validateAndHealSyntax(input.path, updated);
+      const { content: finalContent, issues } = validateAndHealSyntax(input.path, updated);
       fs.writeFileSync(target, finalContent, 'utf-8');
+
+      // Repair may rewrite this file right after the edit landed — everything below
+      // (the memory stamp and the context echo) must reflect the repaired bytes.
+      const feedback = crossFileFeedback(input.path, ctx.project.dir);
+      const onDisk = feedback.rewritten.get(path.basename(input.path)) ?? finalContent;
 
       // Re-stamp the hash, keeping whatever range the model had actually read. See
       // rememberAfterEdit — marking the whole file seen here is the one thing that would
       // let this cache withhold bytes the model has never been shown.
-      rememberAfterEdit(target, finalContent);
+      rememberAfterEdit(target, onDisk);
 
       const removed = countLines(input.old_string) * (input.replace_all ? occurrences : 1);
       const added = countLines(input.new_string) * (input.replace_all ? occurrences : 1);
@@ -514,15 +740,15 @@ export const fsTools = [
       // new_string, so echoing it back charges input tokens to tell it what it just said. On
       // a 100-line insert that echo is larger than the saving, so past a threshold only the
       // surrounding lines are returned and the middle is elided.
-      const updatedLines = updated.split('\n');
+      const updatedLines = onDisk.split('\n');
       const needle = input.new_string;
-      const idx = updated.indexOf(needle);
+      const idx = onDisk.indexOf(needle);
       const PAD = 5;
       const MAX_ECHO_LINES = 20;
       let context = '';
 
       if (idx >= 0) {
-        const editStartLine = updated.slice(0, idx).split('\n').length;
+        const editStartLine = finalContent.slice(0, idx).split('\n').length;
         const editLineCount = needle.split('\n').length;
         const editEndLine = editStartLine + editLineCount - 1;
         const contextStart = Math.max(1, editStartLine - PAD);
@@ -556,10 +782,15 @@ export const fsTools = [
           `(this is current — you do not need to re-read the file to edit near here):\n${body}`;
       }
 
+      const writeTimeFeedback = [
+        ...issues,
+        feedback.text
+      ].filter(Boolean).join('\n');
+
       return {
         content:
           `Edited ${input.path} — ${occurrences === 1 || !input.replace_all ? '1 replacement' : occurrences + ' replacements'}.` +
-          context,
+          context + writeTimeFeedback,
         meta: { added, removed, path: input.path, diff: buildDiff(input.old_string, input.new_string) }
       };
     },

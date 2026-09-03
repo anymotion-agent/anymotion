@@ -79,6 +79,8 @@ export function resolveProvider(config = {}) {
   if (endpoint.includes('kie.ai')) return 'kie';
   if (endpoint.includes('piapi.ai')) return 'piapi';
   if (endpoint.includes('anthropic')) return 'anthropic';
+  if (endpoint.includes('tabitoken.com/v1') || endpoint.includes('tabiai.com/v1')) return 'tabitoken-openai';
+  if (endpoint.includes('tabitoken') || endpoint.includes('tabiai')) return 'tabitoken';
   if (endpoint.includes('agentrouter.org/v1')) return 'agentrouter-openai';
   if (endpoint.includes('agentrouter')) return 'agentrouter';
   return 'agentrouter';
@@ -113,6 +115,7 @@ function apiKeyFromEnv() {
     process.env.ANTHROPIC_API_KEY ||
     process.env.OPENROUTER_API_KEY ||
     process.env.TOKENROUTER_API_KEY ||
+    process.env.TABITOKEN_API_KEY ||
     process.env.OPENCODE_API_KEY ||
     process.env.OPENAI_API_KEY ||
     process.env.GROQ_API_KEY ||

@@ -165,27 +165,36 @@ const TAILWIND_COLORS = {
 };
 
 /**
- * Robust extraction of the 3 to 5 real branding colors from a page,
- * prioritizing meta theme colors, CSS brand variables, Tailwind color tokens,
+ * Pulls brand colours from the markup, giving heavy weight to deliberate authoring tokens
+ * (:root brand vars, meta theme-color, CTA buttons, Tailwind primary utility classes)
  * and filtering out 3rd-party customer logos from partner carousels.
  */
-function extractPalette(html) {
+function extractPalette(html, rawCss = '') {
   const entries = []; // array of { value, weight, source }
 
-  // 1. High-priority: Meta theme-color & tile colors (Weight: 120)
+  // 1. High-priority: Meta theme-color & tile colors (Weight: 150)
   const metaThemeMatches = [
     ...html.matchAll(/<meta[^>]+(?:name|property)=["'](?:theme-color|msapplication-TileColor|msapplication-navbutton-color)["'][^>]+content=["']([^"']+)["']/gi)
   ];
   for (const m of metaThemeMatches) {
-    if (m[1]) entries.push({ value: m[1], weight: 120, source: 'meta' });
+    if (m[1]) entries.push({ value: m[1], weight: 150, source: 'meta' });
   }
 
-  // 2. High-priority: CSS Brand Variables in :root or stylesheets (Weight: 80)
+  // 2. High-priority: CSS Brand Variables in HTML and Stylesheets (Weight: 120)
+  const combinedCssAndHtml = html + '\n' + rawCss;
   const cssVarMatches = [
-    ...html.matchAll(/--(?:primary|brand|accent|main|theme|color-primary|color-brand|color-accent|hero-color|highlight)[^:]*:\s*([^;}\n]+)/gi)
+    ...combinedCssAndHtml.matchAll(/--[a-zA-Z0-9_-]*(?:primary|brand|accent|color-primary|color-brand|color-accent|theme-primary|theme-accent|bright-accent)[a-zA-Z0-9_-]*:\s*([^;}\n]+)/gi)
   ];
   for (const m of cssVarMatches) {
-    if (m[1]) entries.push({ value: m[1].trim(), weight: 80, source: 'css-var' });
+    if (m[1]) entries.push({ value: m[1].trim(), weight: 120, source: 'css-var' });
+  }
+
+  // 3. CTA and Primary Button styles from CSS (Weight: 60)
+  const cssCtaMatches = [
+    ...rawCss.matchAll(/(?:\.btn-primary|\.button-primary|\.cta|\.btn-main|button\[data-primary\])[^{]*\{[^}]*(?:background|background-color|color):\s*([^;}\s]+)/gi)
+  ];
+  for (const m of cssCtaMatches) {
+    if (m[1]) entries.push({ value: m[1].trim(), weight: 60, source: 'cta' });
   }
 
   // Clean HTML to remove scripts, styles, syntax-highlighted code blocks, customer logo clouds, partner carousels & footer social links
@@ -194,11 +203,10 @@ function extractPalette(html) {
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<pre[^>]*>[\s\S]*?<\/pre>/gi, '')
     .replace(/<code[^>]*>[\s\S]*?<\/code>/gi, '')
-    .replace(/<section[^>]*(?:trusted|partner|customer|logo|client|marquee|integrat)[^>]*>[\s\S]*?<\/section>/gi, '')
-    .replace(/<div[^>]*(?:trusted|partner|customer|logo-cloud|client|marquee|integrat)[^>]*>[\s\S]*?<\/div>/gi, '')
+    .replace(/<(?:section|div|ul|ol)[^>]*(?:trusted|partner|customer|logo-cloud|client|marquee|integrat|sponsor|investor)[^>]*>[\s\S]*?<\/(?:section|div|ul|ol)>/gi, '')
     .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '');
 
-  // 3. Tailwind color utility classes in actual markup (Weight: 40)
+  // 4. Tailwind color utility classes in actual markup (Weight: 40)
   for (const [key, hex] of Object.entries(TAILWIND_COLORS)) {
     const regex = new RegExp(`\\b(?:bg|text|border|from|to|via)-${key}\\b`, 'g');
     const matches = cleanHtml.match(regex);
@@ -207,17 +215,17 @@ function extractPalette(html) {
     }
   }
 
-  // 4. Primary CTA buttons & Header elements (Weight: 30)
+  // 5. Primary CTA buttons & Header elements (Weight: 50)
   const ctaMatches = [
-    ...cleanHtml.matchAll(/(?:btn-primary|button-primary|cta|hero)[^>]*style=["'][^"']*(?:background|background-color|color):\s*([^;"]+)/gi)
+    ...cleanHtml.matchAll(/(?:btn-primary|button-primary|cta|signup|get-started|hero-btn)[^>]*style=["'][^"']*(?:background|background-color|color):\s*([^;"]+)/gi)
   ];
   for (const m of ctaMatches) {
-    if (m[1]) entries.push({ value: m[1].trim(), weight: 30, source: 'cta' });
+    if (m[1]) entries.push({ value: m[1].trim(), weight: 50, source: 'cta' });
   }
 
-  // 5. SVG gradients, fills and strokes from content (Weight: 1)
+  // 6. SVG gradients, fills and strokes from content (Weight: 1)
   const svgMatches = [
-    ...cleanHtml.matchAll(/(?:stop-color|fill|stroke)=["'](#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\))["']/gi)
+    ...cleanHtml.matchAll(/(?:stop-color|fill)=["'](#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\))["']/gi)
   ];
   for (const m of svgMatches) {
     if (m[1] && !/^(none|transparent|currentColor)$/i.test(m[1])) {
@@ -225,11 +233,11 @@ function extractPalette(html) {
     }
   }
 
-  // 6. Raw hex codes from markup (Weight: 3 for saturated chromatic, 1 for neutral)
+  // 7. Raw hex codes from markup (Weight: 2 for saturated chromatic, 1 for neutral)
   const rawHex = cleanHtml.match(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g) || [];
   for (const h of rawHex) {
     const parsed = parseColor(h);
-    const weight = (parsed && toHsl(parsed).s >= 0.35) ? 3 : 1;
+    const weight = (parsed && toHsl(parsed).s >= 0.35) ? 2 : 1;
     entries.push({ value: h, weight, source: 'hex' });
   }
 
@@ -285,11 +293,11 @@ function extractPalette(html) {
   const rankedMonochrome = rank(monochrome);
 
   // Authoritative chromatic candidates: from meta theme-color, css variables, cta buttons, or strong recurring accents
+  const topScore = rankedChromatic.length ? rankedChromatic[0].score : 0;
   const authoritativeChromatic = rankedChromatic.filter(b => 
-    b.sources.has('meta') || 
-    b.sources.has('css-var') || 
-    b.sources.has('cta') ||
-    ((b.sources.has('svg') || b.sources.has('hex') || b.sources.has('tailwind')) && b.count >= 3 && b.score >= 20)
+    (b.sources.has('meta') || b.sources.has('css-var') || b.sources.has('cta'))
+      ? b.score >= Math.max(40, topScore * 0.35)
+      : (b.score >= Math.max(30, topScore * 0.45) && b.count >= 3)
   );
 
   const sumScores = (map) => [...map.values()].reduce((acc, b) => acc + b.score, 0);
@@ -305,7 +313,7 @@ function extractPalette(html) {
     // Multi-accent chromatic brand (e.g. Imagine.art, Supabase, Stripe)
     finalColors = authoritativeChromatic.slice(0, 5).map(b => b.hex);
   } else if (!isDominantMonochrome && authoritativeChromatic.length === 1) {
-    // Single-accent chromatic brand (e.g. Higgsfield Lime #d1fe17)
+    // Single-accent chromatic brand (e.g. Spotify Green #1ed760, Higgsfield Lime #d1fe17)
     finalColors = [
       authoritativeChromatic[0].hex,
       '#000000', '#ffffff', '#18181b', '#71717a'
@@ -438,7 +446,7 @@ export function detectTheme(html, colors = [], neutrals = [], isDominantMonochro
  * Pulls the things a motion designer actually needs off a marketing page: the palette,
  * the theme system, the typefaces, the headline copy, and the logo.
  */
-export function extractBrand(html, url) {
+export function extractBrand(html, url, rawCss = '') {
   const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
   const title = titleMatch ? decodeEntities(titleMatch[1]).trim() : '';
 
@@ -450,7 +458,7 @@ export function extractBrand(html, url) {
   // Colours: the few the brand owns, told apart from the greys and near-whites the page
   // uses for surfaces. See extractPalette — ranking every literal value by frequency is
   // what used to hand the planner fourteen "brand colours".
-  const { colors, neutrals, isDominantMonochrome } = extractPalette(html);
+  const { colors, neutrals, isDominantMonochrome } = extractPalette(html, rawCss);
   const theme = detectTheme(html, colors, neutrals, isDominantMonochrome);
 
   // Fonts: Google Fonts links first (they name the family unambiguously), then any
@@ -463,7 +471,8 @@ export function extractBrand(html, url) {
       if (name) fontSet.add(name);
     });
   });
-  (html.match(/font-family\s*:\s*([^;}"']+)/gi) || []).forEach(decl => {
+  const fontSources = html + '\n' + rawCss;
+  (fontSources.match(/font-family\s*:\s*([^;}"']+)/gi) || []).forEach(decl => {
     decl.replace(/^font-family\s*:\s*/i, '')
       .split(',')
       .map(f => f.replace(/["']/g, '').trim())
@@ -548,6 +557,37 @@ async function get(url, signal) {
   return res;
 }
 
+async function getHtmlAndStyles(url, signal) {
+  const res = await get(url, signal);
+  const html = await res.text();
+  let rawCss = '';
+
+  try {
+    const linkMatches = [
+      ...html.matchAll(/<link[^>]+(?:href=["']([^"']+)["'][^>]+rel=["']stylesheet["']|rel=["']stylesheet["'][^>]+href=["']([^"']+)["'])[^>]*>/gi)
+    ];
+    const cssUrls = [];
+    for (const m of linkMatches) {
+      const link = m[1] || m[2];
+      if (link) {
+        try { cssUrls.push(new URL(link, url).href); } catch (_) {}
+      }
+    }
+    for (const cssUrl of cssUrls.slice(0, 3)) {
+      if (signal?.aborted) break;
+      try {
+        const cssRes = await fetch(cssUrl, {
+          headers: { 'User-Agent': UA },
+          signal: signal || AbortSignal.timeout(3000)
+        });
+        if (cssRes.ok) rawCss += '\n' + (await cssRes.text());
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  return { html, rawCss };
+}
+
 /**
  * Draws a placeholder that is worth looking at.
  *
@@ -586,7 +626,7 @@ export function placeholderSvg(opts = {}) {
     </linearGradient>
     <linearGradient id="glow_${id}" x1="50%" y1="0%" x2="50%" y2="100%">
       <stop offset="0%" stop-color="${accent}" stop-opacity="0.25"/>
-      <stop offset="100%" stop-color="${accent}" stop-opacity="0"/>
+      <stop offset="100%" stop-color="${accent}" stop-opacity="0.0"/>
     </linearGradient>
     <linearGradient id="text_${id}" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#ffffff"/>
@@ -645,9 +685,8 @@ export const webTools = [
     },
     async run(input, ctx) {
       if (!/^https?:\/\//i.test(input.url)) throw new Error('url must start with http:// or https://');
-      const res = await get(input.url, ctx.signal);
-      const html = await res.text();
-      const brand = extractBrand(html, input.url);
+      const { html, rawCss } = await getHtmlAndStyles(input.url, ctx.signal);
+      const brand = extractBrand(html, input.url, rawCss);
       return {
         content: formatBrand(brand, input.url),
         meta: {

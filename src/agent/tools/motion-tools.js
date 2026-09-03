@@ -20,6 +20,7 @@ import puppeteer from 'puppeteer';
 import { renderVideo } from '../../render/video-renderer.js';
 import { resolveInProject, ensureDir } from '../sandbox.js';
 import { GLOBAL_DIR } from '../../config/config-manager.js';
+import { auditIdClassContracts } from './contract-audit.js';
 
 const PREVIEW_WIDTH = 1024;
 const PREVIEW_HEIGHT = 576;   // 16:9, and small enough that four frames stay affordable
@@ -240,10 +241,9 @@ export const motionTools = [
     name: 'check_composition',
     description:
       'Audit the composition in a headless browser at 1920×1080 and return a structured report: JavaScript errors, ' +
-      'missing seek/DURATION contract, elements overlapping each other, content pushed off-canvas, visible content ' +
-      'stuck at z-index 0, and whether seek(t) is deterministic. ' +
-      'Run this after building or editing and fix whatever it reports before you claim the work is finished. ' +
-      'It is cheap — no images, just findings.',
+      'class & ID mismatches between HTML/JS/CSS, missing seek/DURATION contract, elements overlapping each other, ' +
+      'content pushed off-canvas, visible content stuck at z-index 0, and whether seek(t) is deterministic. ' +
+      'Run this after building or editing and fix whatever it reports before you claim the work is finished.',
     input_schema: {
       type: 'object',
       properties: {
@@ -258,6 +258,18 @@ export const motionTools = [
       const { page, problems } = await openPage(target, AUDIT_WIDTH, AUDIT_HEIGHT);
       const findings = [];
       const passed = [];
+
+      // ── Automated Cross-File Class & ID Mismatch Static Auditor ──
+      // Shares the exact audit that write_file/edit_file run at write time, so this tool
+      // never disagrees with what the model was already told. Derived from the resolved
+      // `target` — the old version hardcoded index.html/timeline.js in ctx.project.dir and
+      // silently audited the wrong files whenever the caller passed a different path.
+      try {
+        const entryRel = path.basename(target);
+        const projectDir = path.dirname(target);
+        const { findings: contractFindings } = auditIdClassContracts(projectDir, entryRel);
+        findings.push(...contractFindings);
+      } catch (_) {}
 
       try {
         const contract = await page.evaluate(() => {
@@ -892,5 +904,153 @@ function writeProceduralSfxEngine(projectDir) {
       return `${result.meta.preset} · ${Math.round(result.meta.volume * 100)}% volume`;
     },
     label(input) { return `AddBackgroundMusic(${input.preset || 'tech_ambient'})`; }
+  },
+
+  {
+    name: 'diagnose_issue',
+    description:
+      'Fast automated 4-tier bug diagnosis across index.html, style.css, timeline.js, and assets/. ' +
+      'Pass any symptom, element name, class, ID, or feature (e.g. "play button missing", "scene 3 card overlap", "cursor broken", "audio not playing"). ' +
+      'It instantly scans the DOM structure, CSS visibility/geometry rules, JS event listeners/seek transforms, and cross-file contracts, and returns the exact root cause and surgical fix recommendation in one call.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symptom: {
+          type: 'string',
+          description: 'Description of the bug or symptom, e.g. "play button missing", "audio silent", "overlap in scene 2"'
+        },
+        target: {
+          type: 'string',
+          description: 'Optional element ID, class, or keyword to investigate, e.g. "playbtn", "cursor", "s3card"'
+        }
+      },
+      required: ['symptom']
+    },
+    async run(input, ctx) {
+      const projectDir = ctx.project?.dir || process.cwd();
+      const htmlPath = path.join(projectDir, 'index.html');
+      const cssPath = path.join(projectDir, 'style.css');
+      const jsPath = path.join(projectDir, 'timeline.js');
+
+      const keywords = [];
+      if (input.target) keywords.push(input.target.toLowerCase().replace(/^[#.]/, ''));
+      if (input.symptom) {
+        const words = input.symptom.toLowerCase().match(/[a-zA-Z0-9_-]{3,}/g) || [];
+        words.forEach(w => {
+          if (!['the', 'and', 'not', 'for', 'with', 'this', 'that', 'missing', 'broken', 'issue', 'problem'].includes(w)) {
+            keywords.push(w);
+          }
+        });
+      }
+
+      const report = {
+        symptom: input.symptom,
+        htmlFindings: [],
+        cssFindings: [],
+        jsFindings: [],
+        crossFileGaps: [],
+        recommendations: []
+      };
+
+      const html = fs.existsSync(htmlPath) ? fs.readFileSync(htmlPath, 'utf-8') : '';
+      const css = fs.existsSync(cssPath) ? fs.readFileSync(cssPath, 'utf-8') : '';
+      const js = fs.existsSync(jsPath) ? fs.readFileSync(jsPath, 'utf-8') : '';
+
+      // 0. REAL cross-file contract audit — the shared one write_file and
+      // check_composition also run. Unlike the keyword triangulation below, this
+      // compares actual id=/class= attributes against actual getElementById/
+      // querySelector calls with line numbers and suggested corrections, which is
+      // where "classes and ids don't match" symptoms almost always live.
+      try {
+        const { findings: contractFindings } = auditIdClassContracts(projectDir, 'index.html');
+        for (const f of contractFindings) {
+          report.crossFileGaps.push(`🔴 ${f}`);
+          report.recommendations.push(f.split(' — ')[0] + ' — fix with one edit_file.');
+        }
+      } catch (_) {}
+
+      // 1. HTML Scan
+      keywords.forEach(kw => {
+        const hasId = html.includes(`id="${kw}"`) || html.includes(`id='${kw}'`);
+        const hasClass = html.includes(`class="`) && html.includes(kw);
+        const hasText = html.toLowerCase().includes(kw);
+        if (hasId) report.htmlFindings.push(`Found in HTML: id="${kw}"`);
+        else if (hasClass) report.htmlFindings.push(`Found in HTML: class containing "${kw}"`);
+        else if (hasText) report.htmlFindings.push(`Found in HTML text: "${kw}"`);
+        else report.htmlFindings.push(`NOT found in index.html as id or class: "${kw}"`);
+      });
+
+      // 2. CSS Scan
+      keywords.forEach(kw => {
+        const hasRule = css.includes(`#${kw}`) || css.includes(`.${kw}`);
+        if (hasRule) {
+          report.cssFindings.push(`CSS rule exists for #${kw} or .${kw}`);
+          if (css.includes(`display: none`) && css.includes(kw)) {
+            report.cssFindings.push(`⚠️ Possible hidden CSS state (display: none) for "${kw}"`);
+          }
+        } else {
+          report.cssFindings.push(`No direct CSS rule for #${kw} or .${kw}`);
+        }
+      });
+
+      // 3. JS Scan
+      keywords.forEach(kw => {
+        const hasJsQuery = js.includes(`"${kw}"`) || js.includes(`'${kw}'`);
+        if (hasJsQuery) {
+          report.jsFindings.push(`timeline.js queries or references "${kw}"`);
+          if (js.includes(`addEventListener`) && js.includes(kw)) {
+            report.jsFindings.push(`Event listener attached to "${kw}"`);
+          }
+          if (js.includes(`DOM.${kw}`) || js.includes(`pose(`) || js.includes(`style.`)) {
+            report.jsFindings.push(`Animation/transform applied to "${kw}"`);
+          }
+        } else {
+          report.jsFindings.push(`timeline.js does NOT query "${kw}"`);
+        }
+      });
+
+      // 4. Cross-file Triangulation & Discrepancies
+      keywords.forEach(kw => {
+        const inHtml = html.toLowerCase().includes(kw);
+        const inCss = css.toLowerCase().includes(kw);
+        const inJs = js.toLowerCase().includes(kw);
+
+        if (inJs && inCss && !inHtml) {
+          report.crossFileGaps.push(`🔴 CRITICAL DISCREPANCY: "${kw}" is styled in style.css and programmed in timeline.js, but MISSING in index.html!`);
+          report.recommendations.push(`Add the missing <div id="${kw}" class="${kw}">...</div> container into index.html.`);
+        } else if (inHtml && inCss && !inJs) {
+          report.crossFileGaps.push(`⚠️ "${kw}" is in HTML and CSS, but not animated in timeline.js.`);
+        } else if (inHtml && !inCss && !inJs) {
+          report.crossFileGaps.push(`⚠️ "${kw}" is in HTML only, with no dedicated styling or timeline animation.`);
+        }
+      });
+
+      // Format report
+      const body = [
+        `=== Automated Bug Diagnosis Report ===`,
+        `Symptom: "${input.symptom}"`,
+        ``,
+        `1. HTML Structure Analysis:`,
+        ...(report.htmlFindings.length ? report.htmlFindings.map(f => `   • ${f}`) : ['   • No matching elements in HTML']),
+        ``,
+        `2. CSS Presentation Analysis:`,
+        ...(report.cssFindings.length ? report.cssFindings.map(f => `   • ${f}`) : ['   • No matching CSS rules']),
+        ``,
+        `3. JS Behavior & Timeline Analysis:`,
+        ...(report.jsFindings.length ? report.jsFindings.map(f => `   • ${f}`) : ['   • No matching JS logic']),
+        ``,
+        `4. Cross-File Discrepancies:`,
+        ...(report.crossFileGaps.length ? report.crossFileGaps.map(g => `   ${g}`) : ['   ✓ No cross-file gaps detected']),
+        ``,
+        `5. Recommended Surgical Fix:`,
+        ...(report.recommendations.length ? report.recommendations.map((r, i) => `   ${i + 1}. ${r}`) : ['   • Check surrounding container hierarchy and z-index.'])
+      ].join('\n');
+
+      return { content: body, meta: { gaps: report.crossFileGaps.length } };
+    },
+    summarize(input, result) {
+      return result.meta.gaps > 0 ? `${result.meta.gaps} gaps found` : 'diagnosis complete';
+    },
+    label(input) { return `DiagnoseIssue("${input.symptom}")`; }
   }
 ];

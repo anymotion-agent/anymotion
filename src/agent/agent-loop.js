@@ -27,18 +27,19 @@ import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import path from 'path';
 import {
+  THINKING_BUDGETS, buildOpenAIThinkingParams, buildAnthropicThinkingParams,
+  normalizeThinkingLevel
+} from './thinking-params.js';
+import {
   toolSchemas, dispatch, requiresApproval, previewTool, labelTool
 } from './tools/index.js';
 
 /**
- * Duplicated from ai-engine.js on purpose. ai-engine imports this module, so importing
- * back would make the cycle real, and a `const` caught in the temporal dead zone during
- * module evaluation is a genuinely miserable bug to chase.
- *
- * `off: 0` is listed explicitly so an intentional "no thinking" survives the lookup as a
- * real value instead of falling through a default and being handed a budget back.
+ * The budget table itself now lives in thinking-params.js — the single dialect
+ * translator. It imports nothing, so pulling it in from here closes no cycle; the old
+ * note about a `const` in the temporal dead zone applied to importing *ai-engine*, not
+ * to a leaf module.
  */
-const THINKING_BUDGETS = { off: 0, low: 1024, medium: 1536, high: 2048, xhigh: 4096, max: 8192 };
 
 const MAX_TURNS = 150;
 const MAX_RETRIES = 6;
@@ -56,6 +57,7 @@ const CONTEXT_CHAR_BUDGET = 320_000;
  */
 const MODEL_OUTPUT_CAP = {
   'claude-opus-5': 64_000,
+  'claude-opus-5-thinking': 64_000,
   'claude-sonnet-5': 64_000,
   'claude-fable-5': 64_000,
   'claude-haiku-4-5-20251001': 64_000
@@ -291,10 +293,19 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
     max_tokens: params.max_tokens || 8192
   };
 
-  if (params.thinking) {
-    payload.include_reasoning = true;
-    payload.reasoning = { max_tokens: params.thinking.budget_tokens || 4096 };
-  }
+  // Thinking translation happens here — the one place that knows every provider's
+  // dialect. Callers pass `thinkingLevel` (the abstract 'off'…'max' the user picked);
+  // a legacy `thinking: { budget_tokens }` shape is still honoured so older callers
+  // don't silently lose thinking. The old body sent OpenRouter's `reasoning` object to
+  // every endpoint, which OpenAI-native and DeepSeek reject outright, and never sent
+  // any effort knob at all — so the level the user chose changed nothing here.
+  const thinkingLevel = params.thinkingLevel
+    ?? (params.thinking && params.thinking.budget_tokens ? 'high' : null);
+  Object.assign(payload, buildOpenAIThinkingParams({
+    provider,
+    model: params.model,
+    level: thinkingLevel
+  }).body);
 
   const headers = {
     'Content-Type': 'application/json',
@@ -308,7 +319,11 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
     headers['x-app'] = 'cli';
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const requestUrl = (baseUrl.endsWith('/chat/completions') || baseUrl.endsWith('/responses'))
+    ? baseUrl
+    : `${baseUrl}/chat/completions`;
+
+  const response = await fetch(requestUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
@@ -996,6 +1011,8 @@ export function inferProvider(config = {}) {
   if (url.includes('kie.ai')) return 'kie';
   if (url.includes('piapi.ai')) return 'piapi';
   if (url.includes('anthropic.com')) return 'anthropic';
+  if (url.includes('tabitoken.com/v1') || url.includes('tabiai.com/v1')) return 'tabitoken-openai';
+  if (url.includes('tabitoken.com') || url.includes('tabiai.com') || url.includes('tabiai')) return 'tabitoken';
   if (url.includes('agentrouter.org/v1')) return 'agentrouter-openai';
   if (url.includes('agentrouter.org')) return 'agentrouter';
   if (config.provider) {
@@ -1015,6 +1032,8 @@ export function resolveBaseUrl(config = {}) {
     'opencode-zen': 'https://opencode.ai/zen/v1',
     'opencode-go':  'https://opencode.ai/zen/go/v1',
     tokenrouter:    'https://api.tokenrouter.com/v1',
+    tabitoken:      'https://tabitoken.com',
+    'tabitoken-openai': 'https://tabitoken.com/v1',
     openai:         'https://api.openai.com/v1',
     groq:           'https://api.groq.com/openai/v1',
     deepseek:       'https://api.deepseek.com/v1',
@@ -1219,11 +1238,13 @@ export async function runAgentLoop(o) {
 
   while (turns < MAX_TURNS) {
     if (signal?.aborted) { stopReason = 'aborted'; break; }
-    turns++;
-    emit({ type: 'turn', n: turns, of: MAX_TURNS });
-
-    const plan = resolveTokenPlan(model, thinkingDisabled ? 0 : budget);
-
+    // Adaptive Thinking: Extended reasoning is applied before initial code construction.
+    // Once tool execution begins (toolCalls > 0 or turns > 2), thinking budget is scaled to 0
+    // so tool result feedback, audits, and surgical edits execute instantly in seconds rather
+    // than repeating multi-minute thinking stalls on every single tool step.
+    const isExecutionPhase = turns > 4;
+    const turnBudget = (isExecutionPhase && !o.alwaysThink) ? Math.min(budget, 4096) : (thinkingDisabled ? 0 : budget);
+    const plan = resolveTokenPlan(model, turnBudget);
     const activeTodosPrompt = ctx.todos && ctx.todos.length
       ? `\n\n# CURRENT ACTIVE TODO LIST:\n` + ctx.todos.map(t => `- [${t.status.toUpperCase()}] ${t.text}`).join('\n') + `\n\nIMPORTANT: Carry out the active task now. Call the required file or command tools immediately. Do not stop until all tasks are marked DONE.`
       : '';
@@ -1258,8 +1279,24 @@ export async function runAgentLoop(o) {
       ),
       tools: cacheableTools(tools)
     };
-    if (plan.budget) {
-      params.thinking = { type: 'enabled', budget_tokens: plan.budget };
+    // Which dialect the request speaks depends on where it is going. The Anthropic-shaped
+    // path takes the SDK's thinking object; everything else goes through
+    // fetchOpenAIAgentStream, which translates the abstract level itself.
+    //
+    // This block used to force thinking on for GLM even when the user said 'off' — the
+    // exact "low pe bhi sochta rehta hai" complaint — and stamped an `effort` field plus
+    // top-level `reasoning_effort`/`clear_thinking` onto the Anthropic request, none of
+    // which that API defines.
+    const effectiveLevel = thinkingDisabled || (isExecutionPhase && !o.alwaysThink)
+      ? 'off'
+      : normalizeThinkingLevel(o.thinking, 'high');
+    if (provider === 'anthropic' || provider === 'agentrouter' || provider === 'tabitoken') {
+      const t = buildAnthropicThinkingParams(model, effectiveLevel, plan.budget);
+      if (t) params.thinking = t;
+    } else {
+      // 'off' is sent, not merely omitted — GLM, Qwen3 and friends think by default and
+      // need the explicit disable to actually stop.
+      params.thinkingLevel = effectiveLevel;
     }
 
     // ── request, with retries that resume rather than restart ──────────────────
@@ -1275,7 +1312,7 @@ export async function runAgentLoop(o) {
       narration = narration.slice(0, narrationMark);
       try {
         const provider = inferProvider(config);
-        if (provider === 'anthropic' || provider === 'agentrouter') {
+        if (provider === 'anthropic' || provider === 'agentrouter' || provider === 'tabitoken') {
           const stream = await client.messages.stream(params, signal ? { signal } : undefined);
           await withStallGuard(stream, (event) => {
             if (event.type !== 'content_block_delta') return;
@@ -1318,8 +1355,17 @@ export async function runAgentLoop(o) {
         const isBadRequest = status === 400 || msg.includes('400') || msg.includes('invalid_request');
         const mentionsThinking = msg.includes('thinking') || msg.includes('budget_tokens') ||
                                  msg.includes('max_tokens');
-        const isSilentReject = msg.includes('ended without sending any chunks') && params.thinking;
-        const isThinkingShapeError = (isBadRequest && mentionsThinking) || isSilentReject;
+        const thinkingActive = Boolean(params.thinking || params.thinkingLevel);
+        const isSilentReject = msg.includes('ended without sending any chunks') && (params.thinking || params.thinkingLevel);
+        // A 400 from a provider that rejects *any* unknown body field (DeepSeek is strict
+        // here) is as much a thinking-shape failure as one that names the param — the
+        // dialect translator only ever adds thinking fields to an otherwise-valid body,
+        // so the added fields are the variable worth removing first. The same goes for a
+        // provider that accepts each field individually but rejects the combination
+        // (OpenRouter: "Only one of reasoning.effort and reasoning.max_tokens").
+        const isUnknownParamReject = isBadRequest && thinkingActive &&
+          /unknown|unsupported|not supported|unexpected|extra_forbidden|additional properties|only one of/i.test(msg);
+        const isThinkingShapeError = (isBadRequest && mentionsThinking) || isSilentReject || isUnknownParamReject;
 
         if (isThinkingShapeError && attempt === 0) {
           emit({ type: 'notice', text: 'thinking rejected by endpoint — disabling and retrying' });
@@ -1327,6 +1373,7 @@ export async function runAgentLoop(o) {
           // the start rather than each one failing once and healing again.
           thinkingDisabled = true;
           delete params.thinking;
+          delete params.thinkingLevel;
           params.messages = params.messages.map(m => ({
             ...m,
             content: stripThinking(m.content, false)
