@@ -6,7 +6,7 @@ import { extractBrand, formatBrand } from './tools/web-tools.js';
 import { researchBrief, hasUrl } from './research.js';
 import { skillSearchRoots, skillCatalogue, PRIMARY_SKILLS, listSkills, readSkill } from './skills.js';
 import { resetFileMemory } from './tools/fs-tools.js';
-import { runAgentLoop, resolveTokenPlan, resolveBaseUrl, withStallGuard, dropDanglingToolUse, prepareCachedRequest, fetchOpenAIAgentStream, inferProvider } from './agent-loop.js';
+import { runAgentLoop, resolveTokenPlan, resolveBaseUrl, withStallGuard, dropDanglingToolUse, prepareCachedRequest, fetchOpenAIAgentStream, inferProvider, usesAnthropicShape } from './agent-loop.js';
 import { THINKING_BUDGETS, THINKING_LEVELS, buildOpenAIThinkingParams, buildAnthropicThinkingParams, normalizeThinkingLevel } from './thinking-params.js';
 
 // ============================================================
@@ -651,12 +651,13 @@ async function runOpenAIToolLoop({ prompt, config, opts, model }) {
 }
 
 export async function callAIProvider(prompt, config, opts = {}) {
-  const provider = inferProvider(config);
-  if (provider === 'anthropic' || provider === 'agentrouter' || provider === 'tabitoken') {
+  // Routed by the shape the configured endpoint actually serves, not by provider name —
+  // DeepSeek's /anthropic path speaks Messages while its /v1 path speaks OpenAI, and
+  // sending either one the other's shape is a 404.
+  if (usesAnthropicShape(config)) {
     return callClaudeAnthropic(prompt, config, opts);
-  } else {
-    return callOpenAICompatible(prompt, config, opts);
   }
+  return callOpenAICompatible(prompt, config, opts);
 }
 
 // ============================================================
