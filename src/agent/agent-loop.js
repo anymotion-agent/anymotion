@@ -1065,6 +1065,27 @@ export function resolveBaseUrl(config = {}) {
   return baseUrl;
 }
 
+/**
+ * Whether this config should be spoken to in the Anthropic Messages shape.
+ *
+ * The provider name alone cannot answer this. Several vendors ship both surfaces under
+ * different paths, and the path the user configured is the one that decides the request
+ * shape: DeepSeek serves OpenAI's shape at /v1 and Messages at /anthropic. Routing on the
+ * name sent a /anthropic endpoint down the OpenAI path, which POSTs to
+ * <endpoint>/chat/completions — a path that does not exist there, so every request came
+ * back 404 and the CLI silently fell back to its built-in template.
+ *
+ * thinking-params.js already treats `deepseek` as an Anthropic-shaped dialect (it has its
+ * own case in both translators), so only the dispatcher was out of step.
+ */
+export function usesAnthropicShape(config = {}) {
+  const provider = inferProvider(config);
+  if (provider === 'anthropic' || provider === 'agentrouter' || provider === 'tabitoken') return true;
+
+  const base = resolveBaseUrl(config).toLowerCase().replace(/\/+$/, '');
+  return base.endsWith('/anthropic') || base.endsWith('/v1/messages');
+}
+
 export function logError(projectDir, errorDetails) {
   try {
     const dir = projectDir || process.cwd();
@@ -1290,7 +1311,7 @@ export async function runAgentLoop(o) {
     const effectiveLevel = thinkingDisabled || (isExecutionPhase && !o.alwaysThink)
       ? 'off'
       : normalizeThinkingLevel(o.thinking, 'high');
-    if (provider === 'anthropic' || provider === 'agentrouter' || provider === 'tabitoken') {
+    if (usesAnthropicShape(config)) {
       const t = buildAnthropicThinkingParams(model, effectiveLevel, plan.budget);
       if (t) params.thinking = t;
     } else {
@@ -1311,8 +1332,7 @@ export async function runAgentLoop(o) {
     while (attempt <= MAX_RETRIES && !finalMsg) {
       narration = narration.slice(0, narrationMark);
       try {
-        const provider = inferProvider(config);
-        if (provider === 'anthropic' || provider === 'agentrouter' || provider === 'tabitoken') {
+        if (usesAnthropicShape(config)) {
           const stream = await client.messages.stream(params, signal ? { signal } : undefined);
           await withStallGuard(stream, (event) => {
             if (event.type !== 'content_block_delta') return;

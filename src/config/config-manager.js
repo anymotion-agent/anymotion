@@ -169,6 +169,30 @@ export function editorEnabled(config) {
   return isTruthy((config || loadConfig()).editorEnabled);
 }
 
+/**
+ * Strips annotations that are not part of a model id.
+ *
+ * A model picker — or an inherited ANTHROPIC_MODEL — can carry a context-window suffix,
+ * which is how `deepseek-flash[1M]` ended up stored as a model name. No provider
+ * documents a bracketed id, so the bracket is removed before the value reaches a request.
+ */
+function stripModelAnnotation(model) {
+  return String(model ?? '').replace(/\[[^\]]*\]/g, '').trim();
+}
+
+/**
+ * DeepSeek's documented ids are `deepseek-chat` and `deepseek-reasoner`. Everything else
+ * seen in the wild — a `[1M]` annotation, or an OpenRouter-style `deepseek/deepseek-chat`
+ * vendor path — is not a DeepSeek model id, and the vendor path in particular is rejected
+ * outright. Snapping to a documented alias keeps one stored config valid on both the
+ * /v1 and /anthropic surfaces.
+ */
+function normalizeDeepSeekModel(model) {
+  const m = stripModelAnnotation(model).toLowerCase().replace(/^deepseek\//, '');
+  if (m.includes('reason') || m.includes('r1') || m.includes('think')) return 'deepseek-reasoner';
+  return 'deepseek-chat';
+}
+
 export function loadConfig() {
   const configPath = resolveConfigPath();
   const base = defaultConfig();
@@ -216,6 +240,11 @@ export function loadConfig() {
   if (!['manual', 'auto', 'always'].includes(merged.fileApprovalMode)) {
     merged.fileApprovalMode = 'manual';
   }
+
+  // Normalised last, so it covers the stored file and any env var layered above it —
+  // whichever directory the user happens to run from.
+  merged.model = stripModelAnnotation(merged.model);
+  if (merged.provider === 'deepseek') merged.model = normalizeDeepSeekModel(merged.model);
 
   return merged;
 }
