@@ -317,6 +317,8 @@ export async function fetchOpenAIAgentStream(params, config, signal, emit) {
   } else if (provider === 'agentrouter-openai') {
     headers['user-agent'] = 'claude-cli/2.1.220 (external, sdk-cli)';
     headers['x-app'] = 'cli';
+  } else if (isPerplexityApiHost(baseUrl)) {
+    headers['X-Pplx-Integration'] = 'anymotion';
   }
 
   const requestUrl = (baseUrl.endsWith('/chat/completions') || baseUrl.endsWith('/responses'))
@@ -1020,6 +1022,15 @@ export function inferProvider(config = {}) {
     if (p) return p;
   }
   return 'agentrouter';
+}
+
+/** True only for the official Perplexity API host, so custom endpoints are left untouched. */
+export function isPerplexityApiHost(baseUrl) {
+  try {
+    return new URL(baseUrl).hostname === 'api.perplexity.ai';
+  } catch {
+    return false;
+  }
 }
 
 export function resolveBaseUrl(config = {}) {

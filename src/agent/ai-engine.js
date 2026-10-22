@@ -6,7 +6,7 @@ import { extractBrand, formatBrand } from './tools/web-tools.js';
 import { researchBrief, hasUrl } from './research.js';
 import { skillSearchRoots, skillCatalogue, PRIMARY_SKILLS, listSkills, readSkill } from './skills.js';
 import { resetFileMemory } from './tools/fs-tools.js';
-import { runAgentLoop, resolveTokenPlan, resolveBaseUrl, withStallGuard, dropDanglingToolUse, prepareCachedRequest, fetchOpenAIAgentStream, inferProvider } from './agent-loop.js';
+import { runAgentLoop, resolveTokenPlan, resolveBaseUrl, withStallGuard, dropDanglingToolUse, prepareCachedRequest, fetchOpenAIAgentStream, inferProvider, isPerplexityApiHost } from './agent-loop.js';
 import { THINKING_BUDGETS, THINKING_LEVELS, buildOpenAIThinkingParams, buildAnthropicThinkingParams, normalizeThinkingLevel } from './thinking-params.js';
 
 // ============================================================
@@ -367,6 +367,8 @@ async function callOpenAICompatible(prompt, config, opts = {}) {
   } else if (provider === 'agentrouter-openai') {
     headers['user-agent'] = 'claude-cli/2.1.220 (external, sdk-cli)';
     headers['x-app'] = 'cli';
+  } else if (isPerplexityApiHost(baseUrl)) {
+    headers['X-Pplx-Integration'] = 'anymotion';
   }
 
   let maxRetries = 10;
